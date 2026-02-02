@@ -1,0 +1,15 @@
+django
+djangorestframework
+django-cors-headers
+fastapi
+uvicorn[standard]
+python-dotenv
+deepgram-sdk
+langchain
+langchain-groq
+requests
+streamlit
+streamlit-webrtc
+websockets==13.1
+# New dependencies
+langgraph

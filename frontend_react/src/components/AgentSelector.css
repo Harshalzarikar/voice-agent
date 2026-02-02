@@ -1,0 +1,63 @@
+.agent-selector {
+  text-align: center;
+  padding: 40px;
+}
+
+.agent-selector h2 {
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.agent-selector p {
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 30px;
+}
+
+.agent-selector select {
+  width: 100%;
+  max-width: 300px;
+  padding: 14px 18px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 1rem;
+  outline: none;
+  cursor: pointer;
+  margin-bottom: 20px;
+}
+
+.agent-selector select option {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.agent-selector button {
+  padding: 14px 40px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.agent-selector button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+}
+
+.agent-selector button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-selector .no-agents {
+  color: #ff6b6b;
+}
+
+.agent-selector.loading {
+  color: rgba(255, 255, 255, 0.6);
+}

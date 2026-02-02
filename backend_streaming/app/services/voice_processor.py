@@ -1,0 +1,267 @@
+import asyncio
+import json
+from deepgram import AsyncDeepgramClient
+from deepgram.core.events import EventType
+from deepgram.extensions.types.sockets import (
+    ListenV1ControlMessage,
+    SpeakV1TextMessage,
+    SpeakV1ControlMessage,
+)
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langgraph.graph import StateGraph, END
+from typing import TypedDict, Annotated, List
+import operator
+import traceback
+from ..core.config import settings
+
+class AgentState(TypedDict):
+    messages: Annotated[List[HumanMessage | AIMessage | SystemMessage], operator.add]
+    intent: str
+
+class VoiceProcessor:
+    def __init__(self, agent_id: str, websocket, system_prompt: str, voice_id: str):
+        self.agent_id = agent_id
+        self.websocket = websocket
+        self.system_prompt = system_prompt
+        self.voice_id = voice_id
+        self.deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
+        
+        # --- Orchestration Layer (Logic/Routing) ---
+        self.router_llm = ChatGroq(
+            temperature=0,
+            model_name="qwen/qwen3-32b", # Qwen model for orchestration as requested
+            groq_api_key=settings.GROQ_API_KEY
+        )
+
+        # --- Conversational Layer (Personality/Speed) ---
+        self.llm = ChatGroq(
+            temperature=0.7,
+            model_name="llama-3.1-8b-instant", # High-speed for fluid responses
+            groq_api_key=settings.GROQ_API_KEY,
+            max_tokens=200
+        )
+
+        # Build LangGraph
+        self.graph = self._build_graph()
+
+        self.dg_connection = None
+        self.dg_connection_ctx = None
+        self.dg_tts_connection = None
+        self.dg_tts_context = None
+        self.stt_lock = asyncio.Lock() # Lock for STT socket
+        self.tts_lock = asyncio.Lock() # Lock for TTS socket
+        self.stt_lock = asyncio.Lock() # Lock for STT socket
+        self.tts_lock = asyncio.Lock() # Lock for TTS socket
+        self.is_running = True
+        # self.keep_alive_task = None # Removed to prevent race condition
+
+    async def start(self):
+        """Initialize Deepgram STT and TTS connections"""
+        try:
+            # --- STT Setup ---
+            print("Connecting to Deepgram STT...")
+            self.dg_connection_ctx = self.deepgram.listen.v1.connect(
+                model="nova-2",
+                language="en-IN",
+                smart_format="true",
+            )
+            self.dg_connection = await self.dg_connection_ctx.__aenter__()
+            print("Connected to Deepgram STT")
+
+            def on_stt_message(result, **kwargs):
+                try:
+                    if hasattr(result, 'channel'):
+                        alternatives = result.channel.alternatives
+                        if alternatives and len(alternatives) > 0:
+                            sentence = alternatives[0].transcript
+                            if len(sentence.strip()) > 0 and result.is_final:
+                                print(f"Transcript: {sentence}")
+                                asyncio.create_task(self.process_text(sentence))
+                except Exception as e:
+                    print(f"Error processing STT message: {e}")
+
+            self.dg_connection.on(EventType.MESSAGE, on_stt_message)
+            self.dg_connection.on(EventType.ERROR, lambda e: print(f"Deepgram STT Error: {e}"))
+            # Start listening loop in background
+            asyncio.create_task(self.dg_connection.start_listening())
+            
+            # --- TTS Setup ---
+            print(f"Connecting to Deepgram TTS with voice: {self.voice_id}...")
+            self.dg_tts_context = self.deepgram.speak.v1.connect(
+                model=self.voice_id,
+                encoding="linear16",
+                sample_rate=24000
+            )
+            self.dg_tts_connection = await self.dg_tts_context.__aenter__()
+            print("Connected to Deepgram TTS")
+
+            async def on_tts_message(result, **kwargs):
+                try:
+                    # Deepgram sends binary audio chunks or JSON metadata
+                    if isinstance(result, (bytes, bytearray)):
+                        print(f"TTS audio chunk: {len(result)} bytes")
+                        await self.websocket.send_bytes(result)
+                except Exception as e:
+                    print(f"Error processing TTS message: {e}")
+
+            self.dg_tts_connection.on(EventType.MESSAGE, on_tts_message)
+            self.dg_tts_connection.on(EventType.ERROR, lambda e: print(f"Deepgram TTS Error: {e}"))
+            asyncio.create_task(self.dg_tts_connection.start_listening())
+
+            print("VoiceProcessor started successfully")
+            return True
+        except Exception as e:
+            print(f"Error starting VoiceProcessor: {e}")
+            traceback.print_exc()
+            return False
+
+    async def process_audio(self, data: bytes):
+        """Send audio to Deepgram for STT"""
+        if self.dg_connection:
+            async with self.stt_lock:
+                await self.dg_connection.send_media(data)
+
+    def _build_graph(self):
+        """Build the LangGraph StateGraph"""
+        workflow = StateGraph(AgentState)
+
+        # Define Nodes
+        def router_node(state):
+            messages = state["messages"]
+            last_message = messages[-1].content
+            print(f"[Router] Analyzing: {last_message}")
+            
+            # Use Qwen to decide intent
+            try:
+                # Simple classification prompt
+                system_msg = SystemMessage(content="""
+                You are a Router. Analyze the user's input and classify the intent.
+                Return ONLY one of the following JSON strings:
+                {"intent": "end_conversation"}
+                {"intent": "general_chat"}
+                
+                Rules:
+                - "end_conversation": If user says bye, stop, exit, quit.
+                - "general_chat": For everything else.
+                Do not output thinking or markdown. Just the JSON.
+                """)
+                
+                response = self.router_llm.invoke([system_msg, HumanMessage(content=last_message)])
+                content = response.content.strip()
+                
+                # Cleanup potential Qwen thinking tags if present
+                if "</think>" in content:
+                    content = content.split("</think>")[-1].strip()
+                    
+                import json
+                # Try to parse JSON
+                try:
+                    data = json.loads(content)
+                    return {"intent": data.get("intent", "general_chat")}
+                except:
+                    # Fallback if JSON fails
+                    if "end_conversation" in content:
+                        return {"intent": "end_conversation"}
+                    return {"intent": "general_chat"}
+                    
+            except Exception as e:
+                print(f"[Router] Error: {e}, falling back to simple logic")
+                if "bye" in last_message.lower() or "stop" in last_message.lower():
+                    return {"intent": "end_conversation"}
+                return {"intent": "general_chat"}
+
+        async def responder_node(state):
+            """Responder node: Handles Personality & Conversation"""
+            messages = state["messages"]
+            full_messages = [SystemMessage(content=self.system_prompt)] + messages
+            
+            print(f"[Responder] Generating response...")
+            response = await self.llm.ainvoke(full_messages)
+            return {"messages": [response]}
+
+        # Add Nodes
+        workflow.add_node("router", router_node)
+        workflow.add_node("responder", responder_node)
+
+        # Define Edges
+        def route_decision(state):
+            intent = state["intent"]
+            if intent == "end_conversation":
+                return END
+            return "responder"
+
+        workflow.set_entry_point("router")
+        workflow.add_edge("router", "responder")
+        workflow.add_edge("responder", END)
+
+        return workflow.compile()
+
+    async def process_text(self, text: str):
+        """Process text dynamically using LangGraph"""
+        try:
+            print(f"Processing text: {text}")
+            
+            # Invoke Graph
+            inputs = {"messages": [HumanMessage(content=text)], "intent": ""}
+            result = await self.graph.ainvoke(inputs)
+            
+            # Extract Response
+            messages = result["messages"]
+            response_text = messages[-1].content
+            
+            print(f"Graph Response: {response_text}")
+            
+            # 2. TTS Generation (Deepgram)
+            await self.generate_speech(response_text)
+            
+        except Exception as e:
+            print(f"Error in process_text: {e}")
+
+    async def generate_speech(self, text: str):
+        """Generate speech using Deepgram TTS and stream back to client"""
+        try:
+            if self.dg_tts_connection:
+                # Deepgram has a character limit (approx 2000). Truncate if necessary.
+                safe_text = text[:1800] 
+                if len(text) > 1800:
+                    print(f"Warning: Truncating text length {len(text)} to 1800 chars.")
+                
+                async with self.tts_lock:
+                    await self.dg_tts_connection.send_text(SpeakV1TextMessage(type="Speak", text=safe_text))
+                    await self.dg_tts_connection.send_control(SpeakV1ControlMessage(type="Flush"))
+        except Exception as e:
+            print(f"Error in generate_speech: {e}")
+
+    async def _keep_alive(self):
+        """Keep both STT and TTS connections alive"""
+        while self.is_running:
+            try:
+                # STT KeepAlive
+                if self.dg_connection:
+                    try:
+                        async with self.stt_lock:
+                            await self.dg_connection.send_control(ListenV1ControlMessage(type="KeepAlive"))
+                    except Exception as e:
+                        print(f"Error in STT KeepAlive: {e}")
+                
+                # TTS KeepAlive - Not supported/needed as per SpeakV1ControlMessage
+                # if self.dg_tts_connection:
+                #    pass 
+                
+                await asyncio.sleep(5) # Send more frequently (5s) for STT
+            except Exception as e:
+                if self.is_running:
+                    print(f"Error in KeepAlive Loop: {e}")
+                break
+
+    async def stop(self):
+        """Clean up resources"""
+        self.is_running = False
+        
+        if self.dg_connection_ctx:
+            await self.dg_connection_ctx.__aexit__(None, None, None)
+        if self.dg_tts_context:
+            await self.dg_tts_context.__aexit__(None, None, None)
