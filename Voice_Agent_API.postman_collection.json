@@ -37,6 +37,19 @@
 							]
 						}
 					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.collectionVariables.set(\"access_token\", jsonData.access);",
+									"console.log(\"Access token set automatically\");"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"response": []
 				},
 				{
