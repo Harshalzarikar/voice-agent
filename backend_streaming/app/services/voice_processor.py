@@ -13,6 +13,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Annotated, List
+import httpx
 import operator
 import traceback
 from ..core.config import settings
@@ -22,11 +23,13 @@ class AgentState(TypedDict):
     intent: str
 
 class VoiceProcessor:
-    def __init__(self, agent_id: str, websocket, system_prompt: str, voice_id: str):
+    def __init__(self, agent_id: str, websocket, system_prompt: str, voice_id: str, token: str = None, session_id: str = None):
         self.agent_id = agent_id
         self.websocket = websocket
         self.system_prompt = system_prompt
         self.voice_id = voice_id
+        self.auth_token = token
+        self.session_id = session_id
         self.deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
         
         # --- Orchestration Layer (Logic/Routing) ---
@@ -41,7 +44,7 @@ class VoiceProcessor:
             temperature=0.7,
             model_name="llama-3.1-8b-instant", # High-speed for fluid responses
             groq_api_key=settings.GROQ_API_KEY,
-            max_tokens=200
+            max_tokens=100  # Keep responses SHORT for voice
         )
 
         # Build LangGraph
@@ -53,10 +56,10 @@ class VoiceProcessor:
         self.dg_tts_context = None
         self.stt_lock = asyncio.Lock() # Lock for STT socket
         self.tts_lock = asyncio.Lock() # Lock for TTS socket
-        self.stt_lock = asyncio.Lock() # Lock for STT socket
-        self.tts_lock = asyncio.Lock() # Lock for TTS socket
         self.is_running = True
-        # self.keep_alive_task = None # Removed to prevent race condition
+        
+        # Conversation history for context
+        self.conversation_history = []
 
     async def start(self):
         """Initialize Deepgram STT and TTS connections"""
@@ -67,6 +70,7 @@ class VoiceProcessor:
                 model="nova-2",
                 language="en-IN",
                 smart_format="true",
+                endpointing=500,
             )
             self.dg_connection = await self.dg_connection_ctx.__aenter__()
             print("Connected to Deepgram STT")
@@ -90,6 +94,7 @@ class VoiceProcessor:
             
             # --- TTS Setup ---
             print(f"Connecting to Deepgram TTS with voice: {self.voice_id}...")
+            # Direct connection without try/except fallback used previously to avoid 403
             self.dg_tts_context = self.deepgram.speak.v1.connect(
                 model=self.voice_id,
                 encoding="linear16",
@@ -111,12 +116,64 @@ class VoiceProcessor:
             self.dg_tts_connection.on(EventType.ERROR, lambda e: print(f"Deepgram TTS Error: {e}"))
             asyncio.create_task(self.dg_tts_connection.start_listening())
 
+            # --- Start KeepAlive to prevent timeout ---
+            asyncio.create_task(self._keep_alive())
+
             print("VoiceProcessor started successfully")
             return True
         except Exception as e:
             print(f"Error starting VoiceProcessor: {e}")
             traceback.print_exc()
             return False
+
+    async def save_message(self, role: str, content: str):
+        """Save message to backend database"""
+        if not self.auth_token:
+            return
+            
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "agent": self.agent_id,
+                    "role": role,
+                    "content": content
+                }
+                if self.session_id:
+                    payload["session"] = self.session_id
+                    
+                await client.post(
+                    "http://localhost:8000/api/messages/",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.auth_token}"}
+                )
+        except Exception as e:
+            print(f"Error saving message: {e}")
+
+    async def generate_session_title(self, first_message: str):
+        """Generate a short title for the session based on the first message"""
+        if not self.session_id or not self.auth_token:
+            return
+
+        try:
+            # Ask LLM for a title
+            from langchain_core.messages import SystemMessage, HumanMessage
+            prompt = "Generate a very short title (3-5 words max) for a conversation that starts with this message. Return ONLY the title, no quotes."
+            response = await self.llm.ainvoke([
+                SystemMessage(content=prompt),
+                HumanMessage(content=first_message)
+            ])
+            title = response.content.strip()
+
+            # Update Session in DB
+            async with httpx.AsyncClient() as client:
+                await client.patch(
+                    f"http://localhost:8000/api/sessions/{self.session_id}/",
+                    json={"title": title},
+                    headers={"Authorization": f"Bearer {self.auth_token}"}
+                )
+            print(f"Updated session {self.session_id} title to: {title}")
+        except Exception as e:
+            print(f"Error generating title: {e}")
 
     async def process_audio(self, data: bytes):
         """Send audio to Deepgram for STT"""
@@ -176,9 +233,17 @@ class VoiceProcessor:
         async def responder_node(state):
             """Responder node: Handles Personality & Conversation"""
             messages = state["messages"]
-            full_messages = [SystemMessage(content=self.system_prompt)] + messages
             
-            print(f"[Responder] Generating response...")
+            # Build context with history (keep last 10 turns to avoid token overflow)
+            history_messages = self.conversation_history[-10:]
+            
+            # System prompt with SHORT response instruction
+            short_instruction = "\n\nIMPORTANT: Keep responses SHORT and conversational (1-2 sentences max). This is a voice conversation."
+            system_msg = SystemMessage(content=self.system_prompt + short_instruction)
+            
+            full_messages = [system_msg] + history_messages + messages
+            
+            print(f"[Responder] Generating response with {len(history_messages)} history messages...")
             response = await self.llm.ainvoke(full_messages)
             return {"messages": [response]}
 
@@ -187,14 +252,30 @@ class VoiceProcessor:
         workflow.add_node("responder", responder_node)
 
         # Define Edges
-        def route_decision(state):
+        async def route_decision(state):
             intent = state["intent"]
             if intent == "end_conversation":
+                # Send control message to stop frontend mic
+                if self.websocket:
+                    await self.websocket.send_text(json.dumps({
+                        "type": "control",
+                        "action": "stop_audio"
+                    }))
                 return END
             return "responder"
 
         workflow.set_entry_point("router")
-        workflow.add_edge("router", "responder")
+        
+        # Use conditional routing based on intent
+        workflow.add_conditional_edges(
+            "router",
+            route_decision,
+            {
+                END: END,
+                "responder": "responder"
+            }
+        )
+        
         workflow.add_edge("responder", END)
 
         return workflow.compile()
@@ -204,6 +285,23 @@ class VoiceProcessor:
         try:
             print(f"Processing text: {text}")
             
+            # Send User Text to Frontend
+            await self.websocket.send_text(json.dumps({
+                "type": "text",
+                "role": "user",
+                "content": text
+            }))
+            
+            # Store user message in history
+            self.conversation_history.append(HumanMessage(content=text))
+            
+            # Save user message to DB
+            asyncio.create_task(self.save_message("user", text))
+
+            # Auto-generate title if it's the first message and we have a session
+            if self.session_id and len(self.conversation_history) <= 1:
+                asyncio.create_task(self.generate_session_title(text))
+            
             # Invoke Graph
             inputs = {"messages": [HumanMessage(content=text)], "intent": ""}
             result = await self.graph.ainvoke(inputs)
@@ -212,22 +310,56 @@ class VoiceProcessor:
             messages = result["messages"]
             response_text = messages[-1].content
             
+            # Store assistant message in history
+            self.conversation_history.append(AIMessage(content=response_text))
+            
+            # Save assistant message to DB
+            asyncio.create_task(self.save_message("assistant", response_text))
+            
             print(f"Graph Response: {response_text}")
             
+            # 1. Send Text to Frontend
+            await self.websocket.send_text(json.dumps({
+                "type": "text",
+                "role": "assistant",
+                "content": response_text
+            }))
+
             # 2. TTS Generation (Deepgram)
             await self.generate_speech(response_text)
             
         except Exception as e:
             print(f"Error in process_text: {e}")
 
+    def _sanitize_for_speech(self, text: str) -> str:
+        """Remove markdown formatting so TTS reads naturally."""
+        import re
+        # Remove bold/italic markers: **text**, *text*, __text__, _text_
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.+?)\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        text = re.sub(r'_(.+?)_', r'\1', text)
+        # Remove headers: # ## ###
+        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+        # Remove markdown links: [text](url) -> text
+        text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+        # Remove inline code: `code`
+        text = re.sub(r'`(.+?)`', r'\1', text)
+        # Remove remaining stray asterisks or underscores
+        text = re.sub(r'[\*_]{1,2}', '', text)
+        return text.strip()
+
     async def generate_speech(self, text: str):
         """Generate speech using Deepgram TTS and stream back to client"""
         try:
             if self.dg_tts_connection:
+                # Remove markdown so TTS reads naturally
+                clean_text = self._sanitize_for_speech(text)
+                
                 # Deepgram has a character limit (approx 2000). Truncate if necessary.
-                safe_text = text[:1800] 
-                if len(text) > 1800:
-                    print(f"Warning: Truncating text length {len(text)} to 1800 chars.")
+                safe_text = clean_text[:1800] 
+                if len(clean_text) > 1800:
+                    print(f"Warning: Truncating text length {len(clean_text)} to 1800 chars.")
                 
                 async with self.tts_lock:
                     await self.dg_tts_connection.send_text(SpeakV1TextMessage(type="Speak", text=safe_text))

@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from agents.views import AgentViewSet
+from agents.views import AgentViewSet, ChatMessageViewSet, ChatSessionViewSet
 from agents.auth_views import register_user
 
 from rest_framework_simplejwt.views import (
@@ -26,7 +26,9 @@ from rest_framework_simplejwt.views import (
 )
 
 router = DefaultRouter()
-router.register(r'agents', AgentViewSet)
+router.register(r'agents', AgentViewSet, basename='agent')
+router.register(r'sessions', ChatSessionViewSet, basename='session')
+router.register(r'messages', ChatMessageViewSet, basename='message')
 
 urlpatterns = [
     path('admin/', admin.site.urls),

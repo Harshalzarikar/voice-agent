@@ -32,6 +32,9 @@ function Dashboard({ token, user, onSelectAgent, onLogout }) {
       setAgents(data);
     } catch (err) {
       console.error("Failed to load agents:", err);
+      if (err.message && err.message.includes("401")) {
+        onLogout();
+      }
     } finally {
       setLoading(false);
     }

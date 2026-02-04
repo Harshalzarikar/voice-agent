@@ -21,9 +21,10 @@ function App() {
   }, []);
 
   const handleLogin = (accessToken, username) => {
+    localStorage.setItem("token", accessToken);
+    localStorage.setItem("user", JSON.stringify({ username }));
     setToken(accessToken);
     setUser({ username });
-    localStorage.setItem("user", JSON.stringify({ username }));
   };
 
   const handleLogout = () => {
@@ -32,6 +33,7 @@ function App() {
     setToken(null);
     setUser(null);
     setSelectedAgent(null);
+    setAuthView("login");
   };
 
   if (!token) {
