@@ -76,12 +76,17 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
         await websocket.close(code=1011)
         return
 
-    print(f"Connection accepted for agent {agent_id}")
+    print(f"Connection accepted for agent {agent_id}. State: {websocket.client_state}")
     try:
         while True:
             # Receive generic message (text or binary)
+            # print(f"Waiting for message... State: {websocket.client_state}")
             message = await websocket.receive()
             
+            if message["type"] == "websocket.disconnect":
+                print(f"Client disconnected request (event) for agent {agent_id}")
+                break
+
             if "bytes" in message:
                 # Binary audio data
                 data = message["bytes"]
@@ -101,6 +106,9 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     except WebSocketDisconnect:
         print(f"Client disconnected for agent {agent_id}")
         await processor.stop()
+    except RuntimeError as e:
+        print(f"RuntimeError in WebSocket loop: {e}. State: {websocket.client_state}")
+        await processor.stop()
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in WebSocket loop: {e}")
         await processor.stop()

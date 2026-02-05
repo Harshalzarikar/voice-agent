@@ -15,6 +15,7 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
   const audioContextRef = useRef(null);
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
+  const currentAudioSourceRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   // Load Component: Fetch Sessions -> Create New or Load Most Recent
@@ -174,7 +175,14 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
   const stopAudioPlayback = () => {
     audioQueueRef.current = [];
     isPlayingRef.current = false;
-    // Implementation details for audio context stopping if needed
+    if (currentAudioSourceRef.current) {
+      try {
+        currentAudioSourceRef.current.stop();
+      } catch (e) {
+        // Ignore errors if already stopped
+      }
+      currentAudioSourceRef.current = null;
+    }
   };
 
   const playAudioQueue = async () => {
@@ -203,8 +211,12 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     const source = audioContextRef.current.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioContextRef.current.destination);
-    source.onended = playAudioQueue;
+    source.onended = () => {
+      currentAudioSourceRef.current = null;
+      playAudioQueue();
+    };
     source.start();
+    currentAudioSourceRef.current = source;
   };
 
   const startListening = async () => {

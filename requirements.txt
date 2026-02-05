@@ -13,3 +13,4 @@ streamlit-webrtc
 websockets==13.1
 # New dependencies
 langgraph
+langchain-openai

@@ -2,12 +2,12 @@
 	"info": {
 		"_postman_id": "8d4f6c4a-3456-4b1e-9d2e-6a4d7f9e2b1c",
 		"name": "AI Voice Agent API",
-		"description": "API collection for the Artizence Technical Assessment. Includes Authentication and Agent Management endpoints.",
+		"description": "API collection for the Artizence Voice Agent Integration.\n\n### Backends\n- **Core API (Django)**: `http://localhost:8000`\n- **Streaming API (FastAPI)**: `http://localhost:8001`",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
 		{
-			"name": "Authentication",
+			"name": "Authentication (Core 8000)",
 			"item": [
 				{
 					"name": "Login (Obtain JWT)",
@@ -26,15 +26,9 @@
 						"url": {
 							"raw": "http://localhost:8000/api/token/",
 							"protocol": "http",
-							"host": [
-								"localhost"
-							],
+							"host": ["localhost"],
 							"port": "8000",
-							"path": [
-								"api",
-								"token",
-								""
-							]
+							"path": ["api", "token", ""]
 						}
 					},
 					"event": [
@@ -43,14 +37,15 @@
 							"script": {
 								"exec": [
 									"var jsonData = pm.response.json();",
-									"pm.collectionVariables.set(\"access_token\", jsonData.access);",
-									"console.log(\"Access token set automatically\");"
+									"if (jsonData.access) {",
+									"    pm.collectionVariables.set(\"access_token\", jsonData.access);",
+									"    console.log(\"Access token set automatically\");",
+									"}"
 								],
 								"type": "text/javascript"
 							}
 						}
-					],
-					"response": []
+					]
 				},
 				{
 					"name": "Register User",
@@ -69,18 +64,11 @@
 						"url": {
 							"raw": "http://localhost:8000/api/register/",
 							"protocol": "http",
-							"host": [
-								"localhost"
-							],
+							"host": ["localhost"],
 							"port": "8000",
-							"path": [
-								"api",
-								"register",
-								""
-							]
+							"path": ["api", "register", ""]
 						}
-					},
-					"response": []
+					}
 				},
 				{
 					"name": "Token Refresh",
@@ -99,127 +87,117 @@
 						"url": {
 							"raw": "http://localhost:8000/api/token/refresh/",
 							"protocol": "http",
-							"host": [
-								"localhost"
-							],
+							"host": ["localhost"],
 							"port": "8000",
-							"path": [
-								"api",
-								"token",
-								"refresh",
-								""
-							]
+							"path": ["api", "token", "refresh", ""]
 						}
-					},
-					"response": []
+					}
 				}
 			]
 		},
 		{
-			"name": "Agents",
+			"name": "Core Resources (Core 8000)",
 			"item": [
 				{
-					"name": "List All Agents",
+					"name": "Agents - List All",
 					"request": {
 						"auth": {
 							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
+							"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
 						},
 						"method": "GET",
 						"header": [],
-						"url": {
-							"raw": "http://localhost:8000/api/agents/",
-							"protocol": "http",
-							"host": [
-								"localhost"
-							],
-							"port": "8000",
-							"path": [
-								"api",
-								"agents",
-								""
-							]
-						}
-					},
-					"response": []
+						"url": "http://localhost:8000/api/agents/"
+					}
 				},
 				{
-					"name": "Create New Agent",
+					"name": "Agents - Create",
 					"request": {
 						"auth": {
 							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
+							"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
 						},
 						"method": "POST",
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"name\": \"Friendly Assistant\",\n    \"voice_id\": \"aura-asteria-en\",\n    \"system_prompt\": \"You are a warm, helpful assistant. Keep responses brief.\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
+							"raw": "{\n    \"name\": \"Friendly Assistant\",\n    \"voice_id\": \"aura-asteria-en\",\n    \"system_prompt\": \"You are a helpful assistant.\"\n}",
+							"options": {"raw": {"language": "json"}}
 						},
-						"url": {
-							"raw": "http://localhost:8000/api/agents/",
-							"protocol": "http",
-							"host": [
-								"localhost"
-							],
-							"port": "8000",
-							"path": [
-								"api",
-								"agents",
-								""
-							]
-						}
-					},
-					"response": []
+						"url": "http://localhost:8000/api/agents/"
+					}
 				},
 				{
-					"name": "Retrieve Agent Details",
+					"name": "Agents - Detail",
 					"request": {
 						"auth": {
 							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
+							"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+						},
+						"method": "GET",
+						"header": [],
+						"url": "http://localhost:8000/api/agents/1/"
+					}
+				},
+				{
+					"name": "Sessions - List",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
+						},
+						"method": "GET",
+						"header": [],
+						"url": "http://localhost:8000/api/sessions/"
+					}
+				},
+				{
+					"name": "Messages - List (Filter by Session)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [{"key": "token", "value": "{{access_token}}", "type": "string"}]
 						},
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "http://localhost:8000/api/agents/1/",
+							"raw": "http://localhost:8000/api/messages/?session=1",
 							"protocol": "http",
-							"host": [
-								"localhost"
-							],
 							"port": "8000",
-							"path": [
-								"api",
-								"agents",
-								"1",
-								""
-							]
+							"path": ["api", "messages", ""],
+							"query": [{"key": "session", "value": "1"}]
 						}
-					},
-					"response": []
+					}
+				}
+			]
+		},
+		{
+			"name": "Streaming API (FastAPI 8001)",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": "http://localhost:8001/health"
+					}
+				},
+				{
+					"name": "System Info (Voices/Models)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": "http://localhost:8001/info"
+					}
+				},
+				{
+					"name": "WebSocket Endpoint Reference",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"description": "This is a WebSocket endpoint. Use a WebSocket client (like Postman's WS request or wscat) to connect.\n\nURL: `ws://localhost:8001/ws/chat/{agent_id}?token={access_token}&session={session_id}`",
+						"url": "http://localhost:8001/ws/chat/1"
+					}
 				}
 			]
 		}
@@ -227,7 +205,8 @@
 	"variable": [
 		{
 			"key": "access_token",
-			"value": ""
+			"value": "",
+			"type": "string"
 		}
 	]
 }

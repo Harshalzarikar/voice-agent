@@ -6,8 +6,9 @@ from deepgram.extensions.types.sockets import (
     ListenV1ControlMessage,
     SpeakV1TextMessage,
     SpeakV1ControlMessage,
+    ListenV1SpeechStartedEvent,
 )
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -33,18 +34,20 @@ class VoiceProcessor:
         self.deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
         
         # --- Orchestration Layer (Logic/Routing) ---
-        self.router_llm = ChatGroq(
+        self.router_llm = ChatOpenAI(
             temperature=0,
-            model_name="qwen/qwen3-32b", # Qwen model for orchestration as requested
-            groq_api_key=settings.GROQ_API_KEY
+            model="qwen/qwen3-4b:free", # User explicitly requested this model ID
+            openai_api_key=settings.OPENROUTER_API_KEY,
+            openai_api_base="https://openrouter.ai/api/v1"
         )
 
         # --- Conversational Layer (Personality/Speed) ---
-        self.llm = ChatGroq(
+        self.llm = ChatOpenAI(
             temperature=0.7,
-            model_name="llama-3.1-8b-instant", # High-speed for fluid responses
-            groq_api_key=settings.GROQ_API_KEY,
-            max_tokens=100  # Keep responses SHORT for voice
+            model="liquid/lfm-2.5-1.2b-instruct:free",
+            openai_api_key=settings.OPENROUTER_API_KEY,
+            openai_api_base="https://openrouter.ai/api/v1",
+            max_tokens=100
         )
 
         # Build LangGraph
@@ -75,20 +78,48 @@ class VoiceProcessor:
             self.dg_connection = await self.dg_connection_ctx.__aenter__()
             print("Connected to Deepgram STT")
 
+            async def stop_tts():
+                """Stop TTS playback and clear queues"""
+                try:
+                    # 1. Send clear command to Deepgram
+                    if self.dg_tts_connection:
+                        async with self.tts_lock:
+                            await self.dg_tts_connection.send_control(SpeakV1ControlMessage(type="Clear"))
+                    
+                    # 2. Tell frontend to stop playing current audio
+                    if self.websocket:
+                        await self.websocket.send_text(json.dumps({
+                            "type": "control",
+                            "action": "stop_audio"
+                        }))
+                except Exception as e:
+                    print(f"Error stopping TTS: {e}")
+
             def on_stt_message(result, **kwargs):
                 try:
+                    # Handle SpeechStarted (Barge-in / Interruption)
+                    if isinstance(result, ListenV1SpeechStartedEvent) or (hasattr(result, 'type') and result.type == "SpeechStarted"):
+                        print("User started speaking (SpeechStarted event)...")
+                        asyncio.create_task(stop_tts())
+                        return
+
                     if hasattr(result, 'channel'):
                         alternatives = result.channel.alternatives
                         if alternatives and len(alternatives) > 0:
                             sentence = alternatives[0].transcript
-                            if len(sentence.strip()) > 0 and result.is_final:
-                                print(f"Transcript: {sentence}")
-                                asyncio.create_task(self.process_text(sentence))
+                            
+                            # Interruption Logic: If speech detected, stop TTS
+                            if result.speech_final or (len(sentence.strip()) > 0 and result.is_final):
+                                if len(sentence.strip()) > 0:
+                                    print(f"User interrupted with: {sentence}")
+                                    asyncio.create_task(stop_tts())
+                                    asyncio.create_task(self.process_text(sentence))
                 except Exception as e:
                     print(f"Error processing STT message: {e}")
 
             self.dg_connection.on(EventType.MESSAGE, on_stt_message)
             self.dg_connection.on(EventType.ERROR, lambda e: print(f"Deepgram STT Error: {e}"))
+            
             # Start listening loop in background
             asyncio.create_task(self.dg_connection.start_listening())
             
@@ -107,7 +138,7 @@ class VoiceProcessor:
                 try:
                     # Deepgram sends binary audio chunks or JSON metadata
                     if isinstance(result, (bytes, bytearray)):
-                        print(f"TTS audio chunk: {len(result)} bytes")
+                        # print(f"TTS audio chunk: {len(result)} bytes") # Reduce log spam
                         await self.websocket.send_bytes(result)
                 except Exception as e:
                     print(f"Error processing TTS message: {e}")
