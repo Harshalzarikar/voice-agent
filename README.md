@@ -3,7 +3,7 @@
 ### Artizence Systems LLP - Technical Assessment
 **Role**: AI Developer / Full Stack Engineer  
 **Author**: Harshal Zarikar  
-**Submission Date**: February 2, 2026
+**Submission Date**: February 7, 2026
 
 ---
 
