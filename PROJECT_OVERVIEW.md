@@ -35,7 +35,7 @@ Step 5: LangGraph processes the text:
          └── Responder Node: Generates response using LLM
          │
          ▼
-Step 6: LLM (Llama 3.1) generates: "I don't have weather data, but it's always sunny in my digital world!"
+Step 6: LLM (Liquid LFM) generates: "I don't have weather data, but it's always sunny in my digital world!"
          │
          ▼
 Step 7: FastAPI sends text to Deepgram TTS (Text-to-Speech)
@@ -77,7 +77,7 @@ User creates "Sarcastic Bot" → Django saves to database → Returns agent ID =
 |--------------|-----|
 | WebSocket Connection | Browser connects to `/ws/chat/1` |
 | Speech Recognition | Deepgram Nova-2 (live streaming) |
-| AI Responses | LangGraph + Groq LLMs |
+| AI Responses | LangGraph + OpenRouter (Liquid/Qwen) |
 | Voice Synthesis | Deepgram Aura TTS |
 
 **Example Flow**:
@@ -133,12 +133,12 @@ LangGraph is a framework for building **stateful AI workflows**. Instead of just
               └─────────────┘
 ```
 
-### Why Qwen + Llama?
+### Why Qwen + Liquid?
 
 | LLM | Model | Purpose | Why? |
 |-----|-------|---------|------|
-| Router | Qwen-32B | Intent classification | High reasoning capability |
-| Responder | Llama-3.1-8b | Generate responses | Fast, low latency |
+| Router | Qwen-4b (Free) | Intent classification | Efficient reasoning on free tier |
+| Responder | Liquid LFM 2.5 | Generate responses | Fast, lightweight, efficient |
 
 This is called **"Modular Intelligence"** - separating logic from personality.
 
@@ -194,7 +194,7 @@ This is called **"Modular Intelligence"** - separating logic from personality.
 **Answer**:
 > "I optimized for latency at every layer:
 > 1. **Streaming STT** - Deepgram processes audio in real-time, not after recording
-> 2. **Fast LLM** - Using Llama-3.1-8b for responses (optimized for speed)
+> 2. **Efficient LLMs** - Using lightweight models (Liquid 1.2B, Qwen 4B) for speed
 > 3. **Streaming TTS** - Audio is sent in chunks as it's generated
 > 4. **WebSockets** - Persistent connection avoids HTTP overhead
 > 5. **Async Python** - Non-blocking I/O for concurrent processing"
@@ -245,7 +245,7 @@ This is called **"Modular Intelligence"** - separating logic from personality.
 > 3. **Redis** - Add for session management and caching
 > 4. **Kubernetes** - Containerize and orchestrate all services
 > 5. **Deepgram** - They handle scaling on their end (cloud service)
-> 6. **Groq** - Also handles scaling (API service)"
+> 6. **OpenRouter** - Aggregates multiple providers, handling scalability"
 
 ---
 
@@ -280,7 +280,7 @@ This is called **"Modular Intelligence"** - separating logic from personality.
 | Backend API | Django REST Framework | Robust, built-in auth |
 | Real-time | FastAPI + WebSockets | Async, high performance |
 | AI Orchestration | LangGraph | Stateful workflows |
-| LLM Provider | Groq (Llama 3.3 + 3.1) | Fast inference |
+| LLM Provider | OpenRouter (Liquid + Qwen) | Cost-effective, diverse models |
 | Speech-to-Text | Deepgram Nova-2 | Real-time streaming |
 | Text-to-Speech | Deepgram Aura | Natural voices |
 | Auth | SimpleJWT | Industry standard |

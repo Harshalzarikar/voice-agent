@@ -257,7 +257,10 @@ class VoiceProcessor:
                     
             except Exception as e:
                 print(f"[Router] Error: {e}, falling back to simple logic")
-                if "bye" in last_message.lower() or "stop" in last_message.lower():
+                import re
+                text = last_message.lower()
+                # Use regex to match whole words only (prevents "stopped" matching "stop")
+                if re.search(r'\b(bye|goodbye|stop|exit|quit)\b', text):
                     return {"intent": "end_conversation"}
                 return {"intent": "general_chat"}
 
@@ -292,6 +295,13 @@ class VoiceProcessor:
                         "type": "control",
                         "action": "stop_audio"
                     }))
+                # Return a final system message so process_text doesn't just read the last user message
+               
+                # If we return END, the graph stops execution.
+                # But we need to ensure the state has an assistant message if we want process_text to find one.
+                # Alternative: Let route_decision return "responder" even for end_conversation, but tell responder to say bye?
+                # Or: In process_text, check if 'messages' has a new message.
+                
                 return END
             return "responder"
 
@@ -339,7 +349,11 @@ class VoiceProcessor:
             
             # Extract Response
             messages = result["messages"]
-            response_text = messages[-1].content
+            if not messages or isinstance(messages[-1], HumanMessage):
+                # If the last message is still the HumanMessage, it means the graph didn't generate a response (Router -> END)
+                response_text = "Goodbye."
+            else:
+                response_text = messages[-1].content
             
             # Store assistant message in history
             self.conversation_history.append(AIMessage(content=response_text))
@@ -406,9 +420,17 @@ class VoiceProcessor:
                 if self.dg_connection:
                     try:
                         async with self.stt_lock:
-                            await self.dg_connection.send_control(ListenV1ControlMessage(type="KeepAlive"))
+                            # Verify connection is still open before sending
+                            if self.is_running:
+                                await self.dg_connection.send_control(ListenV1ControlMessage(type="KeepAlive"))
                     except Exception as e:
-                        print(f"Error in STT KeepAlive: {e}")
+                        # Suppress "no close frame" error which is common during disconnect
+                        if "no close frame" not in str(e):
+                            print(f"Error in STT KeepAlive: {e}")
+                        else:
+                            # If connection is closed, stop running
+                            print("STT Connection closed (KeepAlive check).")
+                            break
                 
                 # TTS KeepAlive - Not supported/needed as per SpeakV1ControlMessage
                 # if self.dg_tts_connection:

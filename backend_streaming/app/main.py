@@ -74,8 +74,8 @@ async def get_info():
         "stt_model": "deepgram-nova-2",
         "tts_model": "deepgram-aura",
         "orchestration": {
-            "router_model": "llama-3.3-70b-versatile",
-            "responder_model": "llama-3.1-8b-instant"
+            "router_model": "qwen/qwen3-4b:free",
+            "responder_model": "liquid/lfm-2.5-1.2b-instruct:free"
         }
     }
 

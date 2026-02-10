@@ -23,10 +23,10 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        FRONTEND (Streamlit)                       │
+│                        FRONTEND (React)                           │
 │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────────┐  │
-│  │   Login     │  │   Agent     │  │      Voice Chat          │  │
-│  │   Page      │  │   Builder   │  │  (Microphone → Speaker)  │  │
+│  │   Login     │  │   Dashboard │  │      Voice Chat          │  │
+│  │   (JWT)     │  │   (Agents)  │  │  (Microphone → Speaker)  │  │
 │  └─────────────┘  └─────────────┘  └──────────────────────────┘  │
 └────────────────────────────┬─────────────────────────────────────┘
                              │ WebSocket (Audio)
@@ -57,8 +57,8 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Orchestration** | LangGraph + Qwen-32B | Intent classification, routing logic |
-| **Conversational** | Llama-3.1-8b-instant | Fast, personality-driven responses |
+| **Orchestration** | LangGraph + Qwen-4b (Free) | Intent classification, routing logic |
+| **Conversational** | Liquid LFM 2.5 | Fast, personality-driven responses |
 | **STT** | Deepgram Nova-2 | Live speech transcription |
 | **TTS** | Deepgram Aura | Natural voice synthesis |
 
@@ -70,9 +70,9 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 |-----------|------------|
 | Backend (Core) | Django REST Framework, JWT Authentication |
 | Backend (Streaming) | FastAPI, WebSockets, Async Python |
-| Frontend | Streamlit (Prototyping UI) |
+| Frontend | React + Vite + Tailwind CSS |
 | AI Logic | LangChain, LangGraph |
-| LLM Provider | Groq (Qwen-32B + Llama 3.1) |
+| LLM Provider | OpenRouter (Liquid + Qwen) |
 | Voice APIs | Deepgram (STT + TTS) |
 | Testing | Postman Collection (included) |
 
@@ -83,7 +83,7 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 ### Prerequisites
 - Python 3.10 or higher
 - A **Deepgram API Key** (free at [deepgram.com](https://deepgram.com))
-- A **Groq API Key** (free at [console.groq.com](https://console.groq.com))
+- An **OpenRouter API Key** (free at [openrouter.ai](https://openrouter.ai))
 
 ### 1. Clone & Install
 
@@ -111,7 +111,7 @@ Create a `.env` file in the project root:
 
 ```env
 DEEPGRAM_API_KEY=your_deepgram_api_key_here
-GROQ_API_KEY=your_groq_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
 ### 3. Initialize Database
@@ -139,14 +139,17 @@ Open **three separate terminals** and run:
 .\venv\Scripts\uvicorn backend_streaming.app.main:app --reload --port 8001
 ```
 
-**Terminal 3 - Streamlit UI (Port 8501)**
+
+**Terminal 3 - React Frontend (Port 5173)**
 ```bash
-.\venv\Scripts\streamlit run frontend_streamlit/Home.py
+cd frontend_react
+npm install
+npm run dev
 ```
 
 ### 5. Access the Application
 
-Open your browser and navigate to: **http://localhost:8501**
+Open your browser and navigate to: **http://localhost:5173**
 
 ---
 
@@ -271,9 +274,10 @@ voice_agent/
 │       ├── api/            # WebSocket endpoint
 │       ├── core/           # Configuration
 │       └── services/       # VoiceProcessor (LangGraph + Deepgram)
-├── frontend_streamlit/     # Streamlit UI
-│   ├── Home.py             # Login page
-│   └── pages/              # Dashboard, Agent Builder, Voice Chat
+├── frontend_react/         # React Frontend
+│   ├── src/
+│   │   ├── components/     # Dashboard, VoiceChat
+│   │   └── App.jsx         # Main Router
 ├── .env                    # API Keys (create this)
 ├── requirements.txt        # Python dependencies
 ├── Voice_Agent_API.postman_collection.json
@@ -296,7 +300,7 @@ voice_agent/
 
 ## 🏆 Credits
 
-- **LLM Provider**: [Groq](https://console.groq.com) (Ultra-fast inference)
+- **LLM Provider**: [OpenRouter](https://openrouter.ai) (Liquid + Qwen)
 - **Voice APIs**: [Deepgram](https://deepgram.com) (STT + TTS)
 - **Orchestration**: [LangGraph](https://github.com/langchain-ai/langgraph)
 
