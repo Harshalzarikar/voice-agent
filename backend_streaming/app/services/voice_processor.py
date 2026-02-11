@@ -9,6 +9,7 @@ from deepgram.extensions.types.sockets import (
     ListenV1SpeechStartedEvent,
 )
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -34,12 +35,22 @@ class VoiceProcessor:
         self.deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
         
         # --- Orchestration Layer (Logic/Routing) ---
-        self.router_llm = ChatOpenAI(
+        # Primary: OpenRouter (Qwen 4B Free)
+        self.router_llm_primary = ChatOpenAI(
             temperature=0,
-            model="qwen/qwen3-4b:free", # User explicitly requested this model ID
+            model="qwen/qwen3-4b:free",
             openai_api_key=settings.OPENROUTER_API_KEY,
             openai_api_base="https://openrouter.ai/api/v1"
         )
+        
+        # Backup: Groq (Llama 3.3 70B) - used if Primary fails (rate limits)
+        self.router_llm_backup = ChatGroq(
+            temperature=0,
+            model="llama-3.3-70b-versatile",
+            api_key=settings.GROQ_API_KEY
+        )
+        
+
 
         # --- Conversational Layer (Personality/Speed) ---
         self.llm = ChatOpenAI(
@@ -237,7 +248,15 @@ class VoiceProcessor:
                 Do not output thinking or markdown. Just the JSON.
                 """)
                 
-                response = self.router_llm.invoke([system_msg, HumanMessage(content=last_message)])
+                try:
+                    # Try Primary (OpenRouter)
+                    print("[Router] Trying Primary (Qwen)...")
+                    response = self.router_llm_primary.invoke([system_msg, HumanMessage(content=last_message)])
+                except Exception as e:
+                    print(f"[Router] Primary failed: {e}. Switching to Backup (Groq)...")
+                    # Try Backup (Groq)
+                    response = self.router_llm_backup.invoke([system_msg, HumanMessage(content=last_message)])
+                
                 content = response.content.strip()
                 
                 # Cleanup potential Qwen thinking tags if present

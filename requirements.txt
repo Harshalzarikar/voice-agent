@@ -4,6 +4,7 @@ django-cors-headers
 fastapi
 uvicorn[standard]
 python-dotenv
+djangorestframework-simplejwt
 deepgram-sdk
 langchain
 langchain-groq
@@ -11,6 +12,7 @@ requests
 streamlit
 streamlit-webrtc
 websockets==13.1
+gunicorn
 # New dependencies
 langgraph
 langchain-openai

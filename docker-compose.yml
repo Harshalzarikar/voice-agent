@@ -1,0 +1,71 @@
+
+
+services:
+  # 1. Django Backend
+  backend_core:
+    build:
+      context: .
+      dockerfile: backend_core/Dockerfile
+    container_name: voice_agent_core
+    volumes:
+      - ./backend_core:/app/backend_core
+    env_file:
+      - .env
+    depends_on:
+      - db
+    restart: always
+
+  # 2. FastAPI Backend
+  backend_streaming:
+    build:
+      context: .
+      dockerfile: backend_streaming/Dockerfile
+    container_name: voice_agent_streaming
+    volumes:
+      - ./backend_streaming:/app/backend_streaming
+    env_file:
+      - .env
+    restart: always
+
+  # 3. React Frontend
+  frontend:
+    build:
+      context: ./frontend_react
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_WS_URL: "ws://localhost"
+    container_name: voice_agent_frontend
+    restart: always
+
+  # 4. Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: voice_agent_nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend_core
+      - backend_streaming
+    restart: always
+
+  # 5. Database (PostgreSQL - Optional upgrade from SQLite for 'best way')
+  # Using SQLite by default as configured in settings, but adding container for future use.
+  # For now, keeping it simple with SQLite volume if configured, or just running services.
+  # 'db' service is good practice.
+  db:
+      image: postgres:15-alpine
+      container_name: voice_agent_db
+      environment:
+        POSTGRES_DB: voice_agent
+        POSTGRES_USER: admin
+        POSTGRES_PASSWORD: password
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+      restart: always
+
+volumes:
+  postgres_data:

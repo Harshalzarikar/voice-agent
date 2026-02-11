@@ -1,0 +1,19 @@
+# Exclude Dependencies (Install inside Docker)
+node_modules/
+
+# Exclude Git
+.git
+.gitignore
+
+# Exclude Env Files
+.env
+.env.local
+
+# Exclude Build Artifacts
+dist/
+build/
+coverage/
+
+# Exclude IDE Configs
+.vscode/
+.idea/

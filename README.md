@@ -57,7 +57,7 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Orchestration** | LangGraph + Qwen-4b (Free) | Intent classification, routing logic |
+| **Orchestration** | LangGraph + Groq (Llama 3.3) | Intent classification, routing logic |
 | **Conversational** | Liquid LFM 2.5 | Fast, personality-driven responses |
 | **STT** | Deepgram Nova-2 | Live speech transcription |
 | **TTS** | Deepgram Aura | Natural voice synthesis |
@@ -72,7 +72,7 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 | Backend (Streaming) | FastAPI, WebSockets, Async Python |
 | Frontend | React + Vite + Tailwind CSS |
 | AI Logic | LangChain, LangGraph |
-| LLM Provider | OpenRouter (Liquid + Qwen) |
+| LLM Provider | Groq (Router) + OpenRouter (Responder) |
 | Voice APIs | Deepgram (STT + TTS) |
 | Testing | Postman Collection (included) |
 
@@ -296,11 +296,21 @@ voice_agent/
 | `Deepgram Error 1011` | Connection timeout — ensure audio is streaming |
 | `AssertionError` in websockets | Ensure `websockets==13.1` is installed |
 
+## 🐳 Deployment
+
+For production deployment (or easy local testing), use **Docker Compose**.
+
+👉 **[Read the Deployment Guide](DEPLOYMENT.md)**
+
+```bash
+docker-compose up --build
+```
+
 ---
 
 ## 🏆 Credits
 
-- **LLM Provider**: [OpenRouter](https://openrouter.ai) (Liquid + Qwen)
+- **LLM Provider**: [Groq](https://console.groq.com) & [OpenRouter](https://openrouter.ai)
 - **Voice APIs**: [Deepgram](https://deepgram.com) (STT + TTS)
 - **Orchestration**: [LangGraph](https://github.com/langchain-ai/langgraph)
 

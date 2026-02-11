@@ -77,7 +77,7 @@ User creates "Sarcastic Bot" → Django saves to database → Returns agent ID =
 |--------------|-----|
 | WebSocket Connection | Browser connects to `/ws/chat/1` |
 | Speech Recognition | Deepgram Nova-2 (live streaming) |
-| AI Responses | LangGraph + OpenRouter (Liquid/Qwen) |
+| AI Responses | LangGraph + Hybrid Router + OpenRouter (Responder) |
 | Voice Synthesis | Deepgram Aura TTS |
 
 **Example Flow**:
@@ -137,7 +137,7 @@ LangGraph is a framework for building **stateful AI workflows**. Instead of just
 
 | LLM | Model | Purpose | Why? |
 |-----|-------|---------|------|
-| Router | Qwen-4b (Free) | Intent classification | Efficient reasoning on free tier |
+| Router | Qwen (Primary) / Groq (Backup) | Intent classification | Hybrid approach for reliability |
 | Responder | Liquid LFM 2.5 | Generate responses | Fast, lightweight, efficient |
 
 This is called **"Modular Intelligence"** - separating logic from personality.
@@ -280,7 +280,7 @@ This is called **"Modular Intelligence"** - separating logic from personality.
 | Backend API | Django REST Framework | Robust, built-in auth |
 | Real-time | FastAPI + WebSockets | Async, high performance |
 | AI Orchestration | LangGraph | Stateful workflows |
-| LLM Provider | OpenRouter (Liquid + Qwen) | Cost-effective, diverse models |
+| LLM Provider | Groq (Router) + OpenRouter (Responder) | Speed + Efficiency |
 | Speech-to-Text | Deepgram Nova-2 | Real-time streaming |
 | Text-to-Speech | Deepgram Aura | Natural voices |
 | Auth | SimpleJWT | Industry standard |

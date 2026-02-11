@@ -1,0 +1,28 @@
+# Exclude Version Control
+.git
+.gitignore
+
+# Exclude Env Files
+.env
+
+# Exclude Virtual Environment
+venv/
+env/
+
+# Exclude Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Exclude IDE Configs
+.vscode/
+.idea/
+
+# Exclude Frontend (Backend builds don't need these)
+frontend_react/
+frontend_streamlit/
+
+# Exclude Documentation (Optional, saves space)
+Technical Assessment (1).pdf
+*.md

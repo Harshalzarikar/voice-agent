@@ -1,5 +1,18 @@
-const API_BASE = "http://localhost:8000";
-const WS_BASE = "ws://localhost:8001";
+// Smart Defaults: Use ENV if set, otherwise use relative path (production) or localhost (local dev)
+const isDev = import.meta.env.DEV;
+const API_BASE = import.meta.env.VITE_API_URL || (isDev ? "http://localhost:8000" : "");
+// For WebSockets, we need absolute URL. If VITE_WS_URL is missing, derive it from window.location in Prod
+const getWsBase = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (isDev) return "ws://localhost:8001";
+  // In production (relative), derive WS from current HTTPS/HTTP protocol
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}`;
+};
+const WS_BASE = getWsBase();
+
+console.log("DEBUG: API_BASE is:", API_BASE);
+console.log("DEBUG: WS_BASE is:", WS_BASE);
 
 export const login = async (username, password) => {
   const response = await fetch(`${API_BASE}/api/token/`, {
