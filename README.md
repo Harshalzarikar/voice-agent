@@ -1,25 +1,25 @@
-# 🎙️ Real-Time AI Voice Orchestration System
+# 🎙️ VoiceAI - Real-Time Intelligent Voice Assistant
 
-### Artizence Systems LLP - Technical Assessment
-**Role**: AI Developer / Full Stack Engineer  
-**Author**: Harshal Zarikar  
-**Submission Date**: February 7, 2026
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Render-46E3B7?style=for-the-badge&logo=render)](https://voice-agent-1-cvzd.onrender.com/)
+[![Tech Stack](https://img.shields.io/badge/Stack-Django%20%7C%20FastAPI%20%7C%20React-blue?style=for-the-badge)](https://github.com/Harshalzarikar/voice-agent)
+
+> **A low-latency, real-time voice orchestration platform that allows users to create and talk to custom AI agents with unique personalities.**
 
 ---
 
-## 🌟 Project Overview
+## 🚀 Key Features
 
-A modular, high-concurrency platform designed for **low-latency AI voice interactions**. Users can create custom AI agents with unique personalities and have real-time voice conversations with them through a web browser.
-
-### Key Highlights
-- **Sub-second latency** voice-to-voice interaction
-- **Custom personality agents** via system prompts
-- **LangGraph orchestration** for intelligent conversation flow
-- **JWT-secured API** for production readiness
+*   **⚡ Sub-Second Latency**: Optimized for real-time conversation using WebSockets and async Python.
+*   **🗣️ Real-Time Voice Processing**: Bi directional audio streaming with **Deepgram Nova-2** (STT) and **Aura** (TTS).
+*   **🧠 Intelligent Agent Orchestration**: Uses **LangGraph** to manage conversation state, intent classification, and personality routing.
+*   **🤖 Custom Personalities**: Users can build agents with distinct prompts (e.g., "Sarcastic Bot", "Helpful Tutor") that persist via Django.
+*   **🔐 Secure Architecture**: Full JWT authentication flow with role-based access control.
 
 ---
 
 ## 🏗️ System Architecture
+
+This project uses a **Hybrid Monolithic Architecture** deployed on a single Docker container for efficiency.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -59,263 +59,77 @@ A modular, high-concurrency platform designed for **low-latency AI voice interac
 |-------|------------|---------|
 | **Orchestration** | LangGraph + Groq (Llama 3.3) | Intent classification, routing logic |
 | **Conversational** | Liquid LFM 2.5 | Fast, personality-driven responses |
-| **STT** | Deepgram Nova-2 | Live speech transcription |
+| **STT** | Deepgram Nova-2 | Live speech transcription (<300ms latency) |
 | **TTS** | Deepgram Aura | Natural voice synthesis |
+| **WebSockets** | FastAPI | Real-time bi-directional audio streaming |
+
 
 ---
 
-## 💻 Technical Stack
+## 🛠️ Technical Deep Dive
 
-| Component | Technology |
-|-----------|------------|
-| Backend (Core) | Django REST Framework, JWT Authentication |
-| Backend (Streaming) | FastAPI, WebSockets, Async Python |
-| Frontend | React + Vite + Tailwind CSS |
-| AI Logic | LangChain, LangGraph |
-| LLM Provider | Groq (Router) + OpenRouter (Responder) |
-| Voice APIs | Deepgram (STT + TTS) |
-| Testing | Postman Collection (included) |
+### **1. Real-Time Audio Pipeline**
+Unlike traditional assistants that record -> process -> play, VoiceAI streams audio **continuously**.
+1.  **Input**: Browser sends raw PCM audio bytes via WebSocket.
+2.  **Transcription**: Deepgram generates text in <300ms.
+3.  **Reasoning**: LangGraph Router decides if the user finished a thought or is just pausing.
+4.  **Response**: The LLM generates text tokens which are immediately sent to the TTS engine.
+5.  **Output**: Audio is played back to the user while the AI is still "thinking" the rest of the sentence.
 
----
+### **2. LangGraph Orchestration**
+Instead of a simple LLM call, the system uses a graph-based state machine:
+*   **Router Node**: Classifies user intent (e.g., "Question", "End Conversation", "Joke").
+*   **Responder Node**: Generates the actual response based on the Agent's system prompt.
+*   **Memory**: Maintains chat history for context-aware replies.
 
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.10 or higher
-- A **Deepgram API Key** (free at [deepgram.com](https://deepgram.com))
-- An **OpenRouter API Key** (free at [openrouter.ai](https://openrouter.ai))
-
-### 1. Clone & Install
-
-```bash
-# Clone the repository
-git clone <your-repo-url>
-cd voice_agent
-
-# Create virtual environment
-python -m venv venv
-
-# Activate (Windows)
-.\venv\Scripts\activate
-
-# Activate (Mac/Linux)
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-Create a `.env` file in the project root:
-
-```env
-DEEPGRAM_API_KEY=your_deepgram_api_key_here
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-```
-
-### 3. Initialize Database
-
-```bash
-# Apply migrations
-.\venv\Scripts\python backend_core/manage.py migrate
-
-# Create your admin account
-.\venv\Scripts\python backend_core/manage.py createsuperuser
-```
-Follow the prompts to create a username and password.
-
-### 4. Start All Services
-
-Open **three separate terminals** and run:
-
-**Terminal 1 - Django API (Port 8000)**
-```bash
-.\venv\Scripts\python backend_core/manage.py runserver 8000
-```
-
-**Terminal 2 - FastAPI Streaming (Port 8001)**
-```bash
-.\venv\Scripts\uvicorn backend_streaming.app.main:app --reload --port 8001
-```
-
-
-**Terminal 3 - React Frontend (Port 5173)**
-```bash
-cd frontend_react
-npm install
-npm run dev
-```
-
-### 5. Access the Application
-
-Open your browser and navigate to: **http://localhost:5173**
+### **3. Production Deployment**
+Deployed on **Render** using a custom Docker strategy:
+*   **Nginx** acts as a reverse proxy, routing `/` to React, `/api` to Django, and `/ws` to FastAPI.
+*   **Supervisord** manages all three processes inside a single container to maximize resource usage on the free tier.
+*   **Database Migrations** run automatically on container startup to ensure data integrity.
 
 ---
 
-## 📖 User Guide
+## 🚀 Getting Started Locally
 
-### Step 1: Login
-1. Go to the **Home** page.
-2. Enter your username and password (created during `createsuperuser`).
-3. Click **Login**.
+### **Prerequisites**
+*   Docker & Docker Compose
+*   (Optional) API Keys: Deepgram, Groq, OpenRouter
 
-### Step 2: Create an Agent
-1. Navigate to **Agent Builder** in the sidebar.
-2. Fill in:
-   - **Agent Name**: e.g., "Friendly Tutor"
-   - **System Prompt**: e.g., "You are a patient, encouraging tutor who explains concepts simply."
-   - **Voice**: Select from available Deepgram voices.
-3. Click **Create Agent**.
+### **Installation**
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/Harshalzarikar/voice-agent.git
+    cd voice-agent
+    ```
 
-### Step 3: Talk to Your Agent
-1. Navigate to **Voice Chat** in the sidebar.
-2. Select your agent from the dropdown.
-3. Click **Start Call**.
-4. **Allow microphone access** when prompted.
-5. Speak naturally — the agent will respond in real-time!
-6. Click **End Call** when finished.
+2.  **Set up Environment Environment**
+    Create a `.env` file in the root directory:
+    ```env
+    DEEPGRAM_API_KEY=your_key
+    GROQ_API_KEY=your_key
+    OPENROUTER_API_KEY=your_key
+    ```
 
----
-
-## 🔌 API Reference
-
-### Authentication
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/token/` | POST | Get JWT access & refresh tokens |
-| `/api/token/refresh/` | POST | Refresh an expired access token |
-
-**Login Request:**
-```json
-POST /api/token/
-{
-    "username": "your_username",
-    "password": "your_password"
-}
-```
-
-**Response:**
-```json
-{
-    "access": "eyJ0eXAiOiJKV1QiLCJhbGc...",
-    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc..."
-}
-```
-
-### Agents
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/agents/` | GET | Optional | List all agents |
-| `/api/agents/` | POST | Required | Create a new agent |
-| `/api/agents/{id}/` | GET | Optional | Get agent details |
-| `/api/agents/{id}/` | PUT | Required | Update agent |
-| `/api/agents/{id}/` | DELETE | Required | Delete agent |
-
-**Create Agent Request:**
-```json
-POST /api/agents/
-Authorization: Bearer <access_token>
-{
-    "name": "Sales Agent",
-    "system_prompt": "You are a persuasive but friendly sales agent.",
-    "voice_id": "aura-asteria-en"
-}
-```
-
-### WebSocket (Voice Chat)
-
-| Endpoint | Protocol | Description |
-|----------|----------|-------------|
-| `/ws/chat/{agent_id}` | WebSocket | Real-time voice streaming |
-
-**Connection Flow:**
-1. Browser opens WebSocket to `ws://localhost:8001/ws/chat/1`
-2. Server confirms connection
-3. Browser sends binary audio chunks (16kHz, mono, PCM)
-4. Server returns binary audio responses
+3.  **Run with Docker (Recommended)**
+    ```bash
+    docker-compose up --build
+    ```
+    *   Frontend: `http://localhost:5173`
+    *   Backend API: `http://localhost:8000`
 
 ---
 
-## 🎨 Available Voices
+## � Screenshots
 
-| Voice ID | Description |
-|----------|-------------|
-| `aura-asteria-en` | Female, American, Professional |
-| `aura-luna-en` | Female, American, Warm |
-| `aura-stella-en` | Female, American, Friendly |
-| `aura-orion-en` | Male, American, Deep |
-| `aura-arcas-en` | Male, American, Confident |
+*(Add your screenshots here: Dashboard, Voice Chat Interface, Agent Builder)*
 
 ---
 
-## 🧪 Testing with Postman
+## 📬 Contact
 
-1. Import `Voice_Agent_API.postman_collection.json` into Postman.
-2. Use the **Login** request to get an access token.
-3. Copy the `access` token from the response.
-4. In the collection variables, set `access_token` to your token.
-5. Test the Agent CRUD endpoints.
+**Harshal Zarikar**  
+[LinkedIn](https://linkedin.com/in/harshalzarikar) | [GitHub](https://github.com/Harshalzarikar)
 
 ---
-
-## 📁 Project Structure
-
-```
-voice_agent/
-├── backend_core/           # Django REST API
-│   ├── agents/             # Agent model, views, serializers
-│   ├── config/             # Django settings, URLs
-│   └── manage.py
-├── backend_streaming/      # FastAPI WebSocket Server
-│   └── app/
-│       ├── api/            # WebSocket endpoint
-│       ├── core/           # Configuration
-│       └── services/       # VoiceProcessor (LangGraph + Deepgram)
-├── frontend_react/         # React Frontend
-│   ├── src/
-│   │   ├── components/     # Dashboard, VoiceChat
-│   │   └── App.jsx         # Main Router
-├── .env                    # API Keys (create this)
-├── requirements.txt        # Python dependencies
-├── Voice_Agent_API.postman_collection.json
-└── README.md               # This file
-```
-
----
-
-## ⚠️ Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `401 Unauthorized` on login | Check username/password, ensure Django is running |
-| `Connection refused` on Voice Chat | Ensure FastAPI server is running on port 8001 |
-| No audio response | Check browser microphone permissions |
-| `Deepgram Error 1011` | Connection timeout — ensure audio is streaming |
-| `AssertionError` in websockets | Ensure `websockets==13.1` is installed |
-
-## 🐳 Deployment
-
-For production deployment (or easy local testing), use **Docker Compose**.
-
-👉 **[Read the Deployment Guide](DEPLOYMENT.md)**
-
-```bash
-docker-compose up --build
-```
-
----
-
-## 🏆 Credits
-
-- **LLM Provider**: [Groq](https://console.groq.com) & [OpenRouter](https://openrouter.ai)
-- **Voice APIs**: [Deepgram](https://deepgram.com) (STT + TTS)
-- **Orchestration**: [LangGraph](https://github.com/langchain-ai/langgraph)
-
----
-
-## 📄 License
-
-This project is submitted as part of the Artizence Technical Assessment and is for evaluation purposes.
+*Built as a showcase of modern Real-Time AI & Full Stack Engineering skills.*
