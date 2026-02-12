@@ -17,6 +17,7 @@ services:
 
   # 2. FastAPI Backend
   backend_streaming:
+    image: harshal1412/voice_agent-backend_streaming:latest
     build:
       context: .
       dockerfile: backend_streaming/Dockerfile
@@ -29,6 +30,7 @@ services:
 
   # 3. React Frontend
   frontend:
+    image: harshal1412/voice_agent-frontend:latest
     build:
       context: ./frontend_react
       dockerfile: Dockerfile
