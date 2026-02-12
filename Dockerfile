@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn uvicorn
 
 COPY backend_core ./backend_core
 COPY backend_streaming ./backend_streaming
-COPY .env .
+# COPY .env .
 
 # --- Frontend Build ---
 WORKDIR /app/frontend_react

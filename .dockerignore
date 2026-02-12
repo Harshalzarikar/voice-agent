@@ -3,7 +3,7 @@
 .gitignore
 
 # Exclude Env Files
-.env
+##.env
 
 # Exclude Virtual Environment
 venv/
@@ -20,7 +20,7 @@ __pycache__/
 .idea/
 
 # Exclude Frontend (Backend builds don't need these)
-frontend_react/
+# #frontend_react/
 frontend_streamlit/
 
 # Exclude Documentation (Optional, saves space)
