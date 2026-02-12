@@ -48,10 +48,5 @@ RUN chmod -R 755 /var/www/html
 EXPOSE 7860
 
 # Start Supervisor (runs everything)
-# Copy startup script
-COPY startup.sh /app/startup.sh
-RUN sed -i 's/\r$//' /app/startup.sh
-RUN chmod +x /app/startup.sh
-
-# Start with startup script (runs migrations then supervisor)
-CMD ["/app/startup.sh"]
+# Start Supervisor (runs everything) after migrating
+CMD bash -c "python backend_core/manage.py migrate && /usr/bin/supervisord"
