@@ -48,4 +48,10 @@ RUN chmod -R 755 /var/www/html
 EXPOSE 7860
 
 # Start Supervisor (runs everything)
-CMD ["/usr/bin/supervisord"]
+# Copy startup script
+COPY startup.sh /app/startup.sh
+RUN sed -i 's/\r$//' /app/startup.sh
+RUN chmod +x /app/startup.sh
+
+# Start with startup script (runs migrations then supervisor)
+CMD ["/app/startup.sh"]
