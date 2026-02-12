@@ -26,8 +26,8 @@ COPY frontend_react ./
 
 # Configured for Space: zarikarharry1412/voice_agent
 # Note: Underscores in space names usually turn into hyphens in the direct URL.
-ENV VITE_API_URL="https://zarikarharry1412-voice-agent.hf.space"
-ENV VITE_WS_URL="wss://zarikarharry1412-voice-agent.hf.space/ws"
+ENV VITE_API_URL=""
+ENV VITE_WS_URL=""
 
 RUN npm run build
 
