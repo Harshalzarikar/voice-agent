@@ -48,5 +48,7 @@ RUN chmod -R 755 /var/www/html
 EXPOSE 7860
 
 # Start Supervisor (runs everything)
+# Set correct working directory for CMD
+WORKDIR /app
 # Start Supervisor (runs everything) after migrating
 CMD bash -c "python backend_core/manage.py migrate && /usr/bin/supervisord"
