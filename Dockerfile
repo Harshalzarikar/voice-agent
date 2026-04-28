@@ -1,18 +1,21 @@
 # Base image: Python 3.11 (Debian based)
 FROM python:3.11-slim
 
-# Install system dependencies (Nginx, Node.js, Supervisor, FFmpeg)
+# Install system dependencies (Nginx, Node.js, Supervisor, FFmpeg, libsndfile1)
 RUN apt-get update && apt-get install -y \
     nginx \
     nodejs \
     npm \
     supervisor \
     ffmpeg \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Backend Core & Streaming Setup ---
 WORKDIR /app
 COPY requirements.txt .
+# Install CPU-only PyTorch first to save ~2GB of space (since Whisper depends on torch)
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt gunicorn uvicorn
 
 COPY backend_core ./backend_core
