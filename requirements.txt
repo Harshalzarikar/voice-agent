@@ -8,16 +8,15 @@ djangorestframework-simplejwt
 deepgram-sdk
 langchain
 langchain-groq
+langchain-openai
+langgraph
 requests
-streamlit
-streamlit-webrtc
 websockets==13.1
 gunicorn
-# New dependencies
-langgraph
-langchain-openai
+httpx
+# TTS: Kokoro via HuggingFace Spaces
 gradio_client
-openai-whisper
-sounddevice
 soundfile
 numpy
+# STT: Local Whisper (requires ffmpeg system package)
+openai-whisper
