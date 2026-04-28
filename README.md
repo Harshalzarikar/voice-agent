@@ -55,12 +55,13 @@ This project uses a **Hybrid Monolithic Architecture** deployed on a single Dock
 
 ### Layer Breakdown
 
+### Layer Breakdown
+
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Orchestration** | LangGraph + Groq (Llama 3.3) | Intent classification, routing logic |
-| **Conversational** | Liquid LFM 2.5 | Fast, personality-driven responses |
-| **STT** | Deepgram Nova-2 | Live speech transcription (<300ms latency) |
-| **TTS** | Deepgram Aura | Natural voice synthesis |
+| **STT** | OpenAI Whisper (Local) | Live speech transcription (<500ms latency) |
+| **TTS** | Kokoro (HuggingFace Spaces) | Natural voice synthesis |
 | **WebSockets** | FastAPI | Real-time bi-directional audio streaming |
 
 
@@ -70,11 +71,11 @@ This project uses a **Hybrid Monolithic Architecture** deployed on a single Dock
 
 ### **1. Real-Time Audio Pipeline**
 Unlike traditional assistants that record -> process -> play, VoiceAI streams audio **continuously**.
-1.  **Input**: Browser sends raw PCM audio bytes via WebSocket.
-2.  **Transcription**: Deepgram generates text in <300ms.
+1.  **Input**: Browser sends raw PCM audio bytes via WebSocket using an `AudioWorklet`.
+2.  **Transcription**: Local Whisper transcribes chunks dynamically based on silence thresholds.
 3.  **Reasoning**: LangGraph Router decides if the user finished a thought or is just pausing.
 4.  **Response**: The LLM generates text tokens which are immediately sent to the TTS engine.
-5.  **Output**: Audio is played back to the user while the AI is still "thinking" the rest of the sentence.
+5.  **Output**: Audio is synthesized by Kokoro and played back to the user via WebSocket streaming.
 
 ### **2. LangGraph Orchestration**
 Instead of a simple LLM call, the system uses a graph-based state machine:
@@ -93,34 +94,63 @@ Deployed on **Render** using a custom Docker strategy:
 ## 🚀 Getting Started Locally
 
 ### **Prerequisites**
-*   Docker & Docker Compose
-*   (Optional) API Keys: Deepgram, Groq, OpenRouter
+*   Python 3.11+
+*   Node.js 18+
+*   FFmpeg (Required for Whisper STT)
+*   (Optional) API Keys: Groq
 
-### **Installation**
+### **Installation (Local Dev)**
 1.  **Clone the repository**
     ```bash
     git clone https://github.com/Harshalzarikar/voice-agent.git
     cd voice-agent
     ```
 
-2.  **Set up Environment Environment**
+2.  **Set up Environment Variables**
     Create a `.env` file in the root directory:
     ```env
-    DEEPGRAM_API_KEY=your_key
-    GROQ_API_KEY=your_key
-    OPENROUTER_API_KEY=your_key
+    GROQ_API_KEY=your_key_here
+    OPENROUTER_API_KEY=your_key_here
+    DEEPGRAM_API_KEY=your_key_here
     ```
 
-3.  **Run with Docker (Recommended)**
+3.  **Install Python Dependencies**
     ```bash
-    docker-compose up --build
+    python -m venv venv
+    source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+    pip install -r requirements.txt
     ```
-    *   Frontend: `http://localhost:5173`
-    *   Backend API: `http://localhost:8000`
+
+4.  **Run the Django Core Backend**
+    ```bash
+    python backend_core/manage.py migrate
+    python backend_core/manage.py runserver 8000
+    ```
+
+5.  **Run the FastAPI Streaming Backend** (In a new terminal)
+    ```bash
+    source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+    uvicorn backend_streaming.app.main:app --reload --port 8001
+    ```
+
+6.  **Run the React Frontend** (In a new terminal)
+    ```bash
+    cd frontend_react
+    yarn install
+    yarn dev
+    ```
+
+### **Installation (Docker Production)**
+If you want to run the production-ready containerized version locally:
+```bash
+docker-compose up --build
+```
+*   Frontend will be available at: `http://localhost:5173`
+*   Backend API at: `http://localhost:8000/api`
 
 ---
 
-## � Screenshots
+##  Screenshots
 
 *(Add your screenshots here: Dashboard, Voice Chat Interface, Agent Builder)*
 
