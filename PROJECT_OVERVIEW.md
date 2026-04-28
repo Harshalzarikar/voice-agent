@@ -288,6 +288,44 @@ This is called **"Modular Intelligence"** - separating logic from personality.
 
 ---
 
+## 🚀 Deployment & Production Architecture
+
+This project uses a **Monolithic Docker** strategy to run the entire stack (Frontend + Backend + AI) in a **Single Free Render Container**.
+
+### **1. The "Monolithic Docker" Strategy**
+**Interview Q: "Why deploy as a Monolith instead of Microservices?"**
+> **A:** "For a portfolio/MVP, a monolithic Docker container is optimal because:
+> 1.  **Cost Efficiency**: Render's free tier allows only *one* web service. By bundling Nginx, React, Django, and FastAPI together, I get a full-stack app for $0.
+> 2.  **Simplified Operations**: I manage one `Dockerfile` and one deployment pipeline.
+> 3.  **Zero Latency**: Frontend and Backend communicate over `localhost`, which is extremely fast."
+
+### **2. The Production Stack**
+| Component | Technology | Production Role |
+| :--- | :--- | :--- |
+| **Web Server** | **Nginx** | Reverse Proxy. Serves React static files (`/`) and routes API requests to Django (`/api`) or FastAPI (`/ws`). |
+| **Process Manager** | **Supervisord** | Orchestrator. Runs Nginx, Gunicorn (Django), and Uvicorn (FastAPI) simultaneously in one container. |
+| **Database** | **SQLite** | Lightweight, file-based storage. **Critical Trade-off**: Data is wiped on every deployment (Ephemeral). |
+
+### **3. SOLVED: Real-World Edge Cases (Highlight These!)**
+*Discussing bugs you fixed shows experience. Mention these:*
+
+**A. The "Double API Path" Bug**
+- **Issue**: Requests failing on `.../api/api/register/`.
+- **Cause**: Frontend appended `/api` + Environment Variable also had `/api`.
+- **Fix**: Set `VITE_API_URL=""` in Dockerfile to force **relative paths**, allowing Nginx to proxy correctly.
+
+**B. The "500 Internal Server Error" (Missing Tables)**
+- **Issue**: Registration crashed because database tables didn't exist.
+- **Cause**: Fresh Docker containers start with an empty DB, and migrations weren't running.
+- **Fix**: Updated Docker `CMD` to run migrations **inline** before startup:
+  `CMD bash -c "python manage.py migrate && supervisord"`
+
+**C. The "405 Method Not Allowed"**
+- **Issue**: Visiting `/api/register/` in browser showed error.
+- **Cause**: Browsers send GET requests; Registration endpoint only accepts POST. This confirmed the router was working, just accessed incorrectly.
+
+---
+
 ## ✅ Checklist Before Interview
 
 - [ ] Can explain the 3-server architecture
@@ -296,7 +334,9 @@ This is called **"Modular Intelligence"** - separating logic from personality.
 - [ ] Explain JWT authentication flow  
 - [ ] Describe the WebSocket audio streaming
 - [ ] Know the key files and their purposes
-- [ ] Can discuss scaling strategies
+- [ ] Can discuss scaling strategies (Monolith vs. Microservices)
+- [ ] Explain the "Double API Path" edge case
+- [ ] Explain how fresh DB migrations are handled in Docker (CMD inline)
 
 ---
 

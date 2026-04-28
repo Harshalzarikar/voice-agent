@@ -1,28 +1,63 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from .core.config import settings
 from .api import websocket
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    # ── Pre-load Whisper (local openai-whisper) ──────────────────────────
+    try:
+        import whisper
+        print("[Startup] Pre-loading Whisper 'base' model …")
+        await loop.run_in_executor(None, whisper.load_model, "base")
+        print("[Startup] Whisper model ready ✓")
+    except Exception as e:
+        print(f"[Startup] Whisper pre-load skipped: {e}")
+
+    # ── Pre-connect Kokoro TTS (via HuggingFace Spaces) ──────────────────
+    try:
+        from gradio_client import Client as GradioClient
+        print("[Startup] Connecting to Kokoro TTS HF Space …")
+        def _connect_kokoro():
+            return GradioClient("Pendrokar/Kokoro-TTS")
+        app.state.kokoro_client = await loop.run_in_executor(None, _connect_kokoro)
+        print("[Startup] Kokoro TTS connected ✓")
+    except Exception as e:
+        app.state.kokoro_client = None
+        print(f"[Startup] Kokoro TTS pre-connect skipped: {e}")
+
+    yield
+
+    print("[Shutdown] Cleaning up …")
+
+
 app = FastAPI(
     title="Voice Agent Streaming API",
+    lifespan=lifespan,
     description="""
 ## Real-Time AI Voice Orchestration System
 
-This API provides real-time voice streaming capabilities for AI agents.
-
 ### Features
-- **WebSocket Voice Chat**: Connect to `/ws/chat/{agent_id}` for real-time voice interaction
-- **LangGraph Orchestration**: Intelligent routing and response generation
-- **Deepgram Integration**: Low-latency STT and TTS
+- **WebSocket Voice Chat**: `/ws/chat/{agent_id}`
+- **STT**: Local OpenAI Whisper (no API cost)
+- **TTS**: Kokoro TTS via HuggingFace Spaces
+- **LangGraph Orchestration**: Intent classification + response generation
 
 ### Architecture
-- **Orchestration Layer**: Qwen-32B for intent classification
-- **Conversational Layer**: Llama-3.1-8b for fast responses
-- **Voice Processing**: Deepgram Nova-2 (STT) + Aura (TTS)
+- **STT**: Local Whisper `base` model → fallback: Deepgram Nova-2
+- **TTS**: Kokoro (HF Spaces) → fallback: Deepgram Aura
+- **Router LLM**: Groq Llama-3.3-70b-versatile
+- **Responder LLM**: Groq Llama-3.3-70b-versatile
+- **Backup Router**: Groq Llama-3.1-8b-instant
     """,
-    version="1.0.0",
+    version="2.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
 )
 
 app.add_middleware(
@@ -33,49 +68,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include WebSocket router
 app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
 
 
 @app.get("/", tags=["Health"])
 async def root():
-    """
-    Root endpoint - confirms the API is running.
-    """
     return {"message": "Voice Agent Streaming API is running", "status": "healthy"}
 
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """
-    Health check endpoint for monitoring and load balancers.
-    """
     return {
         "status": "healthy",
         "service": "voice-agent-streaming",
-        "version": "1.0.0"
+        "version": "2.0.0",
     }
 
 
 @app.get("/info", tags=["Info"])
 async def get_info():
-    """
-    Get information about the available voice models and configuration.
-    """
+    kokoro_status = (
+        "kokoro-hf-spaces (active)"
+        if getattr(app.state, "kokoro_client", None)
+        else "deepgram-aura (fallback)"
+    )
     return {
-        "available_voices": [
-            {"id": "aura-asteria-en", "name": "Asteria", "gender": "Female", "accent": "American"},
-            {"id": "aura-luna-en", "name": "Luna", "gender": "Female", "accent": "American"},
-            {"id": "aura-stella-en", "name": "Stella", "gender": "Female", "accent": "American"},
-            {"id": "aura-orion-en", "name": "Orion", "gender": "Male", "accent": "American"},
-            {"id": "aura-arcas-en", "name": "Arcas", "gender": "Male", "accent": "American"},
+        "stt": "local-whisper (active)",
+        "tts": kokoro_status,
+        "kokoro_voices": [
+            {"id": "af_heart",   "name": "Heart",   "gender": "Female", "accent": "American"},
+            {"id": "af_bella",   "name": "Bella",   "gender": "Female", "accent": "American"},
+            {"id": "af_nicole",  "name": "Nicole",  "gender": "Female", "accent": "American"},
+            {"id": "af_sarah",   "name": "Sarah",   "gender": "Female", "accent": "American"},
+            {"id": "am_adam",    "name": "Adam",    "gender": "Male",   "accent": "American"},
+            {"id": "am_michael", "name": "Michael", "gender": "Male",   "accent": "American"},
+            {"id": "bf_emma",    "name": "Emma",    "gender": "Female", "accent": "British"},
+            {"id": "bf_isabella","name": "Isabella","gender": "Female", "accent": "British"},
+            {"id": "bm_george",  "name": "George",  "gender": "Male",   "accent": "British"},
+            {"id": "bm_lewis",   "name": "Lewis",   "gender": "Male",   "accent": "British"},
+        ],
+        "deepgram_voices_fallback": [
+            {"id": "aura-asteria-en", "name": "Asteria", "gender": "Female"},
+            {"id": "aura-luna-en",    "name": "Luna",    "gender": "Female"},
+            {"id": "aura-orion-en",   "name": "Orion",   "gender": "Male"},
         ],
         "websocket_endpoint": "/ws/chat/{agent_id}",
-        "stt_model": "deepgram-nova-2",
-        "tts_model": "deepgram-aura",
         "orchestration": {
-            "router_model": "groq/llama-3.3-70b-versatile",
-            "responder_model": "liquid/lfm-2.5-1.2b-instruct:free"
-        }
+            "router_model":    "groq/llama-3.3-70b-versatile",
+            "responder_model": "groq/llama-3.3-70b-versatile",
+            "backup_router":   "groq/llama-3.1-8b-instant",
+        },
     }
-

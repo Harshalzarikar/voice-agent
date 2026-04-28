@@ -16,3 +16,8 @@ gunicorn
 # New dependencies
 langgraph
 langchain-openai
+gradio_client
+openai-whisper
+sounddevice
+soundfile
+numpy

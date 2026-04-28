@@ -219,27 +219,58 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     currentAudioSourceRef.current = source;
   };
 
+  const micStreamRef = useRef(null);
+  const scriptNodeRef = useRef(null);
+  const micSourceRef = useRef(null);
+
   const startListening = async () => {
     try {
-      if (audioContextRef.current) {
-        await audioContextRef.current.resume();
-      } else {
+      // Create a dedicated AudioContext at 16kHz for mic capture
+      const micContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000,
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      micStreamRef.current = stream;
+
+      const source = micContext.createMediaStreamSource(stream);
+      micSourceRef.current = source;
+
+      // Buffer size 4096 at 16kHz ≈ 256ms chunks
+      const scriptNode = micContext.createScriptProcessor(4096, 1, 1);
+      scriptNodeRef.current = scriptNode;
+
+      scriptNode.onaudioprocess = (e) => {
+        if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+        const float32 = e.inputBuffer.getChannelData(0);
+        // Convert float32 → int16 PCM
+        const int16 = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          const s = Math.max(-1, Math.min(1, float32[i]));
+          int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        wsRef.current.send(int16.buffer);
+      };
+
+      source.connect(scriptNode);
+      scriptNode.connect(micContext.destination);
+
+      // Also ensure playback AudioContext exists
+      if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
           sampleRate: 24000,
         });
+      } else {
+        await audioContextRef.current.resume();
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(event.data);
-        }
-      };
-
-      mediaRecorder.start(250);
       setIsListening(true);
       setStatus("listening");
     } catch (err) {
@@ -248,12 +279,20 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
   };
 
   const stopListening = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
-      setIsListening(false);
-      setStatus("connected");
+    if (scriptNodeRef.current) {
+      scriptNodeRef.current.disconnect();
+      scriptNodeRef.current = null;
     }
+    if (micSourceRef.current) {
+      micSourceRef.current.disconnect();
+      micSourceRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+    }
+    setIsListening(false);
+    setStatus("connected");
   };
 
   const getStatusText = () => {
