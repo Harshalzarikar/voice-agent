@@ -177,7 +177,6 @@ class WhisperSTT:
             print(f"[Whisper STT] Transcription error: {e}")
 
     def _transcribe_sync(self, pcm: bytes) -> str:
-        model = self._load_model()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
             with wave.open(tmp_path, "wb") as wf:
@@ -186,9 +185,30 @@ class WhisperSTT:
                 wf.setframerate(self.SAMPLE_RATE)
                 wf.writeframes(pcm)
         try:
-            segments, _ = model.transcribe(tmp_path, language=self._language, beam_size=1)
-            text = "".join(segment.text for segment in segments).strip()
-            return text
+            # ── Optimal 0MB RAM Fix: Offload STT to Groq API ──
+            groq_api_key = getattr(settings, "GROQ_API_KEY", None)
+            if groq_api_key:
+                print("[Whisper] Calling Groq Whisper API (0MB RAM)...")
+                with open(tmp_path, "rb") as f:
+                    response = httpx.post(
+                        "https://api.groq.com/openai/v1/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {groq_api_key}"},
+                        data={"model": "distil-whisper-large-v3-en"},
+                        files={"file": ("audio.wav", f, "audio/wav")},
+                        timeout=10.0
+                    )
+                response.raise_for_status()
+                text = response.json().get("text", "").strip()
+                return text
+            else:
+                # Fallback to local memory model
+                model = self._load_model()
+                segments, _ = model.transcribe(tmp_path, language=self._language, beam_size=1)
+                text = "".join(segment.text for segment in segments).strip()
+                return text
+        except Exception as e:
+            print(f"[Whisper STT] Transcription error: {e}")
+            return ""
         finally:
             os.unlink(tmp_path)
 
