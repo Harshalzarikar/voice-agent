@@ -86,8 +86,14 @@ class WhisperSTT:
     def _load_model(self):
         global _GLOBAL_WHISPER_MODEL
         if _GLOBAL_WHISPER_MODEL is None:
-            print(f"[Whisper] Loading '{self.MODEL_SIZE}' model into global memory (int8) …")
-            _GLOBAL_WHISPER_MODEL = WhisperModel(self.MODEL_SIZE, device="cpu", compute_type="int8")
+            print(f"[Whisper] Loading '{self.MODEL_SIZE}' model into global memory (int8, 1 thread) …")
+            _GLOBAL_WHISPER_MODEL = WhisperModel(
+                self.MODEL_SIZE, 
+                device="cpu", 
+                compute_type="int8", 
+                cpu_threads=1, 
+                num_workers=1
+            )
             print("[Whisper] Global model ready")
         return _GLOBAL_WHISPER_MODEL
 
