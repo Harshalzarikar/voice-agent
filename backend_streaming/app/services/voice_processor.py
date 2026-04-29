@@ -188,15 +188,35 @@ class WhisperSTT:
             # ── Optimal 0MB RAM Fix: Offload STT to Groq API ──
             groq_api_key = getattr(settings, "GROQ_API_KEY", None)
             if groq_api_key:
-                print("[Whisper] Calling Groq Whisper API (0MB RAM)...")
                 import requests
+                
+                # Fetch available Whisper models dynamically (cache it on the class to save time)
+                if not getattr(self, "_groq_model", None):
+                    print("[Whisper] Fetching available Groq Whisper models...")
+                    resp = requests.get(
+                        "https://api.groq.com/openai/v1/models",
+                        headers={"Authorization": f"Bearer {groq_api_key}"}
+                    )
+                    models = [m["id"] for m in resp.json().get("data", []) if "whisper" in m["id"]]
+                    print(f"[Whisper] Available Groq Models: {models}")
+                    
+                    if "whisper-large-v3-turbo" in models:
+                        self._groq_model = "whisper-large-v3-turbo"
+                    elif "whisper-large-v3" in models:
+                        self._groq_model = "whisper-large-v3"
+                    elif len(models) > 0:
+                        self._groq_model = models[0]
+                    else:
+                        raise ValueError("No Whisper models available on Groq!")
+
+                print(f"[Whisper] Calling Groq Whisper API ({self._groq_model})...")
                 with open(tmp_path, "rb") as f:
                     response = requests.post(
                         "https://api.groq.com/openai/v1/audio/transcriptions",
                         headers={"Authorization": f"Bearer {groq_api_key}"},
-                        data={"model": "whisper-large-v3-turbo"},
+                        data={"model": self._groq_model},
                         files={"file": ("audio.wav", f, "audio/wav")},
-                        timeout=10.0
+                        timeout=15.0
                     )
                 if response.status_code != 200:
                     print(f"[Whisper STT] Groq API Error: {response.status_code} - {response.text}")
