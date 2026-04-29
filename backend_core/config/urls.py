@@ -30,11 +30,17 @@ router.register(r'agents', AgentViewSet, basename='agent')
 router.register(r'sessions', ChatSessionViewSet, basename='session')
 router.register(r'messages', ChatMessageViewSet, basename='message')
 
+from django.http import JsonResponse
+
+def ping(request):
+    return JsonResponse({"status": "alive"})
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/register/', register_user, name='register'),
     path('api/', include(router.urls)),
+    path('ping/', ping, name='ping'),
 ]
 
