@@ -60,6 +60,8 @@ class AgentState(TypedDict):
 # ─────────────────────────────────────────────
 #  Local Whisper STT helper
 # ─────────────────────────────────────────────
+_GLOBAL_WHISPER_MODEL = None
+
 class WhisperSTT:
     SAMPLE_RATE           = 16_000
     CHANNELS              = 1
@@ -71,7 +73,6 @@ class WhisperSTT:
 
     def __init__(self, language: str = "en"):
         self._language              = language
-        self._model                 = None
         self._buffer: bytearray     = bytearray()
         self._speech_started        = False
         self._last_speech_ts: float = 0.0
@@ -83,10 +84,12 @@ class WhisperSTT:
         self._monitor_task: asyncio.Task | None = None
 
     def _load_model(self):
-        if self._model is None:
-            print(f"[Whisper] Loading '{self.MODEL_SIZE}' model …")
-            self._model = local_whisper.load_model(self.MODEL_SIZE)
-            print("[Whisper] Model ready")
+        global _GLOBAL_WHISPER_MODEL
+        if _GLOBAL_WHISPER_MODEL is None:
+            print(f"[Whisper] Loading '{self.MODEL_SIZE}' model into global memory …")
+            _GLOBAL_WHISPER_MODEL = local_whisper.load_model(self.MODEL_SIZE)
+            print("[Whisper] Global model ready")
+        return _GLOBAL_WHISPER_MODEL
 
     def start(self):
         self._monitor_task = asyncio.create_task(self._silence_monitor())
@@ -168,7 +171,7 @@ class WhisperSTT:
             print(f"[Whisper STT] Transcription error: {e}")
 
     def _transcribe_sync(self, pcm: bytes) -> str:
-        self._load_model()
+        model = self._load_model()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
             with wave.open(tmp_path, "wb") as wf:
@@ -177,7 +180,7 @@ class WhisperSTT:
                 wf.setframerate(self.SAMPLE_RATE)
                 wf.writeframes(pcm)
         try:
-            result = self._model.transcribe(tmp_path, language=self._language, fp16=False)
+            result = model.transcribe(tmp_path, language=self._language, fp16=False)
             return (result.get("text") or "").strip()
         finally:
             os.unlink(tmp_path)
