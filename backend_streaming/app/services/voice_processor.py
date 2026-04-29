@@ -44,12 +44,12 @@ except ImportError:
     print("[TTS] gradio_client not installed – will fall back to Deepgram TTS")
 
 try:
-    import whisper as local_whisper
+    from faster_whisper import WhisperModel
     WHISPER_AVAILABLE = True
-    print("[STT] Local openai-whisper found")
+    print("[STT] Local faster-whisper found")
 except ImportError:
     WHISPER_AVAILABLE = False
-    print("[STT] openai-whisper not installed – will fall back to Deepgram STT")
+    print("[STT] faster-whisper not installed – will fall back to Deepgram STT")
 
 
 class AgentState(TypedDict):
@@ -86,8 +86,8 @@ class WhisperSTT:
     def _load_model(self):
         global _GLOBAL_WHISPER_MODEL
         if _GLOBAL_WHISPER_MODEL is None:
-            print(f"[Whisper] Loading '{self.MODEL_SIZE}' model into global memory …")
-            _GLOBAL_WHISPER_MODEL = local_whisper.load_model(self.MODEL_SIZE)
+            print(f"[Whisper] Loading '{self.MODEL_SIZE}' model into global memory (int8) …")
+            _GLOBAL_WHISPER_MODEL = WhisperModel(self.MODEL_SIZE, device="cpu", compute_type="int8")
             print("[Whisper] Global model ready")
         return _GLOBAL_WHISPER_MODEL
 
@@ -180,8 +180,9 @@ class WhisperSTT:
                 wf.setframerate(self.SAMPLE_RATE)
                 wf.writeframes(pcm)
         try:
-            result = model.transcribe(tmp_path, language=self._language, fp16=False)
-            return (result.get("text") or "").strip()
+            segments, _ = model.transcribe(tmp_path, language=self._language, beam_size=1)
+            text = "".join(segment.text for segment in segments).strip()
+            return text
         finally:
             os.unlink(tmp_path)
 
