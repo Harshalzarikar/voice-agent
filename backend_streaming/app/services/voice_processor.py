@@ -5,14 +5,22 @@ import wave
 import time
 import tempfile
 import os
-from deepgram import AsyncDeepgramClient
-from deepgram.core.events import EventType
-from deepgram.extensions.types.sockets import (
-    ListenV1ControlMessage,
-    SpeakV1TextMessage,
-    SpeakV1ControlMessage,
-    ListenV1SpeechStartedEvent,
-)
+try:
+    from deepgram import AsyncDeepgramClient
+    from deepgram.core.events import EventType
+    from deepgram.extensions.types.sockets import (
+        ListenV1ControlMessage,
+        SpeakV1TextMessage,
+        SpeakV1ControlMessage,
+        ListenV1SpeechStartedEvent,
+    )
+except ImportError:
+    AsyncDeepgramClient = None
+    EventType = None
+    class ListenV1ControlMessage: pass
+    class SpeakV1TextMessage: pass
+    class SpeakV1ControlMessage: pass
+    class ListenV1SpeechStartedEvent: pass
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -240,7 +248,10 @@ class VoiceProcessor:
         self.session_id    = session_id
 
         # ── Deepgram (fallback) ──────────────────────────────────────────
-        self.deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
+        if AsyncDeepgramClient:
+            self.deepgram = AsyncDeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
+        else:
+            self.deepgram = None
 
         # ── Primary STT: local Whisper ───────────────────────────────────
         if WHISPER_AVAILABLE:
