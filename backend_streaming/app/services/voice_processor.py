@@ -189,14 +189,17 @@ class WhisperSTT:
             groq_api_key = getattr(settings, "GROQ_API_KEY", None)
             if groq_api_key:
                 print("[Whisper] Calling Groq Whisper API (0MB RAM)...")
+                import requests
                 with open(tmp_path, "rb") as f:
-                    response = httpx.post(
+                    response = requests.post(
                         "https://api.groq.com/openai/v1/audio/transcriptions",
                         headers={"Authorization": f"Bearer {groq_api_key}"},
-                        data={"model": "distil-whisper-large-v3-en"},
+                        data={"model": "whisper-large-v3-turbo"},
                         files={"file": ("audio.wav", f, "audio/wav")},
                         timeout=10.0
                     )
+                if response.status_code != 200:
+                    print(f"[Whisper STT] Groq API Error: {response.status_code} - {response.text}")
                 response.raise_for_status()
                 text = response.json().get("text", "").strip()
                 return text
