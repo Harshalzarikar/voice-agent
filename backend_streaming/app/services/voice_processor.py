@@ -571,7 +571,10 @@ Do not output thinking or markdown. Just the JSON.
             history_messages = self.conversation_history[-10:]
             short_instruction = (
                 "\n\nIMPORTANT: Keep responses SHORT and conversational (1-2 sentences max). "
-                "This is a voice conversation."
+                "This is a voice conversation. "
+                "CRITICAL: If the user speaks to you in Hindi, you must understand them, "
+                "but you MUST reply in 'Hinglish' (Hindi language written in English alphabet characters, e.g., 'Aap kaise ho?'). "
+                "Do NOT use Devanagari script because the Text-to-Speech engine cannot read it."
             )
             system_msg = SystemMessage(content=self.system_prompt + short_instruction)
             full_messages = [system_msg] + history_messages + state["messages"]
