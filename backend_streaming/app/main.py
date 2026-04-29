@@ -11,13 +11,8 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
 
     # ── Pre-load Whisper (local openai-whisper) ──────────────────────────
-    try:
-        import whisper
-        print("[Startup] Pre-loading Whisper 'base' model …")
-        await loop.run_in_executor(None, whisper.load_model, "base")
-        print("[Startup] Whisper model ready ✓")
-    except Exception as e:
-        print(f"[Startup] Whisper pre-load skipped: {e}")
+    # Removed to save memory on startup. Whisper will lazy-load in VoiceProcessor
+    # when the first user speaks.
 
     # ── Pre-connect Kokoro TTS (via HuggingFace Spaces) ──────────────────
     try:

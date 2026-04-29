@@ -67,7 +67,7 @@ class WhisperSTT:
     SILENCE_RMS_THRESHOLD = 300
     SILENCE_DURATION_S    = 0.6
     MIN_SPEECH_DURATION_S = 0.3
-    MODEL_SIZE            = "base"
+    MODEL_SIZE            = "tiny.en"
 
     def __init__(self, language: str = "en"):
         self._language              = language
