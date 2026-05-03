@@ -10,6 +10,7 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     # Extract token and session from query params
     token = websocket.query_params.get("token")
     session_id = websocket.query_params.get("session")
+    language = websocket.query_params.get("language", "English")
     
     await websocket.accept()
     
@@ -38,7 +39,7 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
         print(f"Error fetching agent {agent_id}: {e}")
 
     # Initialize processor with token and session
-    processor = VoiceProcessor(agent_id, websocket, system_prompt, voice_id, token, session_id)
+    processor = VoiceProcessor(agent_id, websocket, system_prompt, voice_id, token, session_id, language)
     
     # Load previous history for this session
     try:

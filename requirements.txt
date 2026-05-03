@@ -20,3 +20,7 @@ soundfile
 numpy
 # STT: Local Whisper (requires ffmpeg system package)
 faster-whisper
+
+# Database (Supabase / Postgres)
+dj-database-url
+psycopg2-binary

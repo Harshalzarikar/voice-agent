@@ -88,10 +88,13 @@ export const register = async (username, password, email = "") => {
   return data;
 };
 
-export const getWebSocketUrl = (agentId, token, sessionId) => {
+export const getWebSocketUrl = (agentId, token, sessionId, language) => {
   let url = `${WS_BASE}/ws/chat/${agentId}?token=${token}`;
   if (sessionId) {
     url += `&session=${sessionId}`;
+  }
+  if (language) {
+    url += `&language=${encodeURIComponent(language)}`;
   }
   return url;
 };

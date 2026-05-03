@@ -144,6 +144,35 @@
   padding: 16px 24px;
   background: transparent;
   border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.language-selector {
+  display: flex;
+  gap: 8px;
+  background-color: var(--surface-color);
+  padding: 4px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+}
+
+.lang-btn {
+  background: none;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.lang-btn.active {
+  background-color: var(--primary-color);
+  color: white;
 }
 
 /* Reuse existing chat styles */

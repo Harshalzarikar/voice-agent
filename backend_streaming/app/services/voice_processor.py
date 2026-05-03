@@ -39,8 +39,10 @@ try:
     import soundfile as sf
     KOKORO_AVAILABLE = True
     print("[TTS] gradio_client + soundfile found (Kokoro TTS via HF Spaces)")
+    SVARA_AVAILABLE = True
 except ImportError:
     KOKORO_AVAILABLE = False
+    SVARA_AVAILABLE = False
     print("[TTS] gradio_client not installed – will fall back to Deepgram TTS")
 
 try:
@@ -279,6 +281,74 @@ class KokoroTTS:
         pcm16 = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
         return pcm16.tobytes()
 
+# ─────────────────────────────────────────────
+#  Svara TTS helper  (via HuggingFace Spaces API for Hindi)
+# ─────────────────────────────────────────────
+class SvaraTTS:
+    """
+    Calls the hosted Svara TTS on HuggingFace Spaces via gradio_client.
+    Returns raw PCM bytes (16-bit, mono) at the native sample rate (24kHz).
+    """
+    HF_SPACE = "kenpath/svara-tts"
+
+    def __init__(self, language: str = "Hindi (हिन्दी)", gender: str = "Female"):
+        self._language = language
+        self._gender = gender
+        self._client = None
+
+    def _ensure_client(self):
+        if self._client is None:
+            print(f"[TTS] Connecting to Svara HF Space ({self.HF_SPACE}) …")
+            self._client = GradioClient(self.HF_SPACE)
+            print("[TTS] Svara HF Space connected")
+
+    async def synthesize(self, text: str) -> bytes:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._synthesize_sync, text)
+
+    def _synthesize_sync(self, text: str) -> bytes:
+        import numpy as np
+        self._ensure_client()
+        # Call the HF Space predict function
+        # signature: generate_speech(language, gender, text, temperature, top_p, repetition_penalty, max_new_tokens)
+        try:
+            result = self._client.predict(
+                language=self._language,
+                gender=self._gender,
+                text=text,
+                temperature=0.7,
+                top_p=0.8,
+                repetition_penalty=1.1,
+                max_new_tokens=2048,
+                api_name="/generate_speech"
+            )
+        except Exception as e:
+            print(f"[SvaraTTS] Error with named parameters, trying positional: {e}")
+            result = self._client.predict(
+                self._language,
+                self._gender,
+                text,
+                0.7, # temperature
+                0.8, # top_p
+                1.1, # repetition_penalty
+                2048, # max_new_tokens
+                api_name="/generate_speech"
+            )
+            
+        # The result is typically a tuple (sample_rate, file_path) from Gradio Audio output
+        if isinstance(result, tuple) and len(result) == 2:
+            temp_filepath = result[1]
+        elif isinstance(result, str):
+            temp_filepath = result
+        else:
+            print(f"[SvaraTTS] Unexpected return format: {type(result)}")
+            return b""
+            
+        audio_data, sample_rate = sf.read(temp_filepath)
+        pcm16 = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
+        return pcm16.tobytes()
+
+
 
 # ─────────────────────────────────────────────
 #  VoiceProcessor
@@ -292,6 +362,7 @@ class VoiceProcessor:
         voice_id: str,
         token: str = None,
         session_id: str = None,
+        language: str = "English"
     ):
         self.agent_id      = agent_id
         self.websocket     = websocket
@@ -299,6 +370,7 @@ class VoiceProcessor:
         self.voice_id      = voice_id
         self.auth_token    = token
         self.session_id    = session_id
+        self.language      = language
 
         # ── Deepgram (fallback) ──────────────────────────────────────────
         if AsyncDeepgramClient:
@@ -316,16 +388,26 @@ class VoiceProcessor:
             self._use_whisper = False
             self._whisper = None
 
-        # ── Primary TTS: Kokoro (via HuggingFace Spaces) ─────────────────
-        if KOKORO_AVAILABLE:
+        # ── Primary TTS: Kokoro/Svara ─────────────────
+        if self.language.lower() == "hindi" and SVARA_AVAILABLE:
+            print("[TTS] Primary: Svara HF Spaces for Hindi")
+            self._use_kokoro = False
+            self._kokoro = None
+            self._use_svara = True
+            self._svara = SvaraTTS(language="Hindi (हिन्दी)")
+        elif KOKORO_AVAILABLE:
             kokoro_voice = getattr(settings, "KOKORO_VOICE", "af_heart")
             print(f"[TTS] Primary: Kokoro HF Spaces (voice={kokoro_voice})")
             self._use_kokoro = True
             self._kokoro = KokoroTTS(voice=kokoro_voice)
+            self._use_svara = False
+            self._svara = None
         else:
             print("[TTS] Falling back to Deepgram TTS")
             self._use_kokoro = False
             self._kokoro = None
+            self._use_svara = False
+            self._svara = None
 
         # ── LLMs (all Groq for speed + reliability) ────────────────────────
         self.router_llm_primary = ChatGroq(
@@ -485,8 +567,22 @@ class VoiceProcessor:
     async def generate_speech(self, text: str):
         clean_text = self._sanitize_for_speech(text)
 
-        # ── Primary: Kokoro (HF Spaces) ──────────────────────────────────
-        if self._use_kokoro and self._kokoro:
+        # ── Primary: Svara/Kokoro (HF Spaces) ──────────────────────────────────
+        if getattr(self, "_use_svara", False) and self._svara:
+            try:
+                print("[TTS] Synthesizing with Svara (Hindi)...")
+                pcm = await self._svara.synthesize(clean_text)
+                if pcm:
+                    chunk_size = 4096
+                    for i in range(0, len(pcm), chunk_size):
+                        await self.websocket.send_bytes(pcm[i : i + chunk_size])
+                    print(f"[TTS] Svara sent {len(pcm)} bytes")
+                    return
+                else:
+                    print("[TTS] Svara returned empty – falling back to Deepgram")
+            except Exception as e:
+                print(f"[TTS] Svara error: {e} – falling back to Deepgram")
+        elif self._use_kokoro and self._kokoro:
             try:
                 print("[TTS] Synthesizing with Kokoro...")
                 pcm = await self._kokoro.synthesize(clean_text)
@@ -572,10 +668,19 @@ Do not output thinking or markdown. Just the JSON.
             short_instruction = (
                 "\n\nIMPORTANT: Keep responses SHORT and conversational (1-2 sentences max). "
                 "This is a voice conversation. "
-                "CRITICAL: If the user speaks to you in Hindi, you must understand them, "
-                "but you MUST reply in 'Hinglish' (Hindi language written in English alphabet characters, e.g., 'Aap kaise ho?'). "
-                "Do NOT use Devanagari script because the Text-to-Speech engine cannot read it."
             )
+            
+            if self.language.lower() == "hindi":
+                short_instruction += (
+                    "CRITICAL: The user is speaking Hindi. You MUST reply in conversational Hindi (written in Devanagari script, e.g. 'आप कैसे हैं?'). "
+                    "Do NOT use English or Hinglish for Hindi responses. You may add emotional tags at the end like <happy> or <sad>."
+                )
+            else:
+                short_instruction += (
+                    "CRITICAL: If the user speaks to you in Hindi, you must understand them, "
+                    "but you MUST reply in 'Hinglish' (Hindi language written in English alphabet characters, e.g., 'Aap kaise ho?'). "
+                    "Do NOT use Devanagari script because the default Text-to-Speech engine cannot read it."
+                )
             system_msg = SystemMessage(content=self.system_prompt + short_instruction)
             full_messages = [system_msg] + history_messages + state["messages"]
             print(f"[Responder] Generating with {len(history_messages)} history msgs")

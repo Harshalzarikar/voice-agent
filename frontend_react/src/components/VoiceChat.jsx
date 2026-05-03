@@ -9,6 +9,7 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [inputText, setInputText] = useState("");
+  const [language, setLanguage] = useState("English");
   
   const wsRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -74,8 +75,8 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     }
   };
 
-  const selectSession = (sessionId) => {
-    if (currentSessionId === sessionId) return;
+  const selectSession = (sessionId, forceReconnect = false, langOverride = null) => {
+    if (currentSessionId === sessionId && !forceReconnect) return;
     
     // Close existing connection
     if (wsRef.current) {
@@ -84,14 +85,15 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     
     setMessages([]); // Clear explicit state, will load from WS history
     setCurrentSessionId(sessionId);
-    connectWebSocket(sessionId);
+    connectWebSocket(sessionId, langOverride);
   };
 
-  const connectWebSocket = (sessionId) => {
+  const connectWebSocket = (sessionId, langOverride = null) => {
     const token = localStorage.getItem("token");
+    const activeLang = langOverride || language;
     setStatus("connecting");
     
-    const ws = new WebSocket(getWebSocketUrl(agent.id, token, sessionId));
+    const ws = new WebSocket(getWebSocketUrl(agent.id, token, sessionId, activeLang));
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -362,6 +364,30 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
                 {getStatusText()}
               </div>
             </div>
+          </div>
+          <div className="language-selector">
+            <button 
+              className={`lang-btn ${language === 'English' ? 'active' : ''}`}
+              onClick={() => {
+                setLanguage('English');
+                if (currentSessionId) {
+                  selectSession(currentSessionId, true, 'English');
+                }
+              }}
+            >
+              EN
+            </button>
+            <button 
+              className={`lang-btn ${language === 'Hindi' ? 'active' : ''}`}
+              onClick={() => {
+                setLanguage('Hindi');
+                if (currentSessionId) {
+                  selectSession(currentSessionId, true, 'Hindi');
+                }
+              }}
+            >
+              HI
+            </button>
           </div>
         </div>
 
