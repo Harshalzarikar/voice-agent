@@ -257,7 +257,10 @@ class KokoroTTS:
     def _ensure_client(self):
         if self._client is None:
             print(f"[TTS] Connecting to Kokoro HF Space ({self.HF_SPACE}) …")
-            self._client = GradioClient(self.HF_SPACE)
+            hf_token = getattr(settings, "HF_TOKEN", None)
+            kwargs = {}
+            if hf_token: kwargs["token"] = hf_token
+            self._client = GradioClient(self.HF_SPACE, **kwargs)
             print("[TTS] Kokoro HF Space connected")
 
     async def synthesize(self, text: str) -> bytes:
@@ -299,7 +302,10 @@ class SvaraTTS:
     def _ensure_client(self):
         if self._client is None:
             print(f"[TTS] Connecting to Svara HF Space ({self.HF_SPACE}) …")
-            self._client = GradioClient(self.HF_SPACE)
+            hf_token = getattr(settings, "HF_TOKEN", None)
+            kwargs = {}
+            if hf_token: kwargs["token"] = hf_token
+            self._client = GradioClient(self.HF_SPACE, **kwargs)
             print("[TTS] Svara HF Space connected")
 
     async def synthesize(self, text: str) -> bytes:

@@ -8,6 +8,7 @@ class Settings:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     KOKORO_VOICE=os.getenv("KOKORO_VOICE") or "af_heart"
+    HF_TOKEN = os.getenv("HF_TOKEN")
     CORS_ORIGINS = ["*"]
 
 settings = Settings()
