@@ -516,11 +516,15 @@ class VoiceProcessor:
         asyncio.create_task(self.dg_connection.start_listening())
 
     async def _start_tts(self):
-        if not self._use_kokoro:
+        # Only start Deepgram if neither Kokoro nor Svara is active
+        if not self._use_kokoro and not getattr(self, "_use_svara", False):
             await self._start_deepgram_tts()
-        # kokoro-onnx is stateless — no persistent connection needed
+        # Kokoro and Svara are stateless — no persistent connection needed
 
     async def _start_deepgram_tts(self):
+        if not self.deepgram:
+            print("[TTS] Deepgram client not available for fallback")
+            return
         print(f"[TTS] Connecting to Deepgram TTS (fallback, voice={self.voice_id})...")
         self.dg_tts_context = self.deepgram.speak.v1.connect(
             model=self.voice_id,
