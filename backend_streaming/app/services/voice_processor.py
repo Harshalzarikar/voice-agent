@@ -354,6 +354,67 @@ class SvaraTTS:
         pcm16 = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
         return pcm16.tobytes()
 
+# ─────────────────────────────────────────────
+#  Fal Kokoro Hindi TTS helper (via Fal AI)
+# ─────────────────────────────────────────────
+class FalKokoroHindiTTS:
+    """
+    Calls the fal-ai/kokoro/hindi model via Fal API.
+    Returns raw PCM bytes (16-bit, mono).
+    """
+    def __init__(self, voice: str = "hm_omega"):
+        self._voice = voice
+
+    async def synthesize(self, text: str) -> bytes:
+        fal_key = getattr(settings, "FAL_KEY", None)
+        if not fal_key:
+            print("[TTS] FAL_KEY missing. Please set FAL_KEY in your .env")
+            return b""
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                print(f"[TTS] Calling Fal AI Kokoro Hindi (voice={self._voice}) ...")
+                response = await client.post(
+                    "https://fal.run/fal-ai/kokoro/hindi",
+                    headers={
+                        "Authorization": f"Key {fal_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "prompt": text,
+                        "voice": self._voice
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                audio_url = data.get("audio", {}).get("url")
+                
+                if not audio_url:
+                    print("[TTS] Fal AI returned no audio URL")
+                    return b""
+                    
+                # Download audio
+                audio_resp = await client.get(audio_url)
+                audio_resp.raise_for_status()
+                audio_bytes = audio_resp.content
+                
+                # Convert to PCM using soundfile
+                import soundfile as sf
+                import io
+                import numpy as np
+                
+                with io.BytesIO(audio_bytes) as f:
+                    audio_data, sample_rate = sf.read(f)
+                    
+                # Ensure it's mono
+                if len(audio_data.shape) > 1:
+                    audio_data = audio_data.mean(axis=1)
+                
+                pcm16 = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
+                return pcm16.tobytes()
+        except Exception as e:
+            print(f"[TTS] Fal AI Kokoro error: {e}")
+            return b""
 
 
 # ─────────────────────────────────────────────
@@ -394,26 +455,33 @@ class VoiceProcessor:
             self._use_whisper = False
             self._whisper = None
 
-        # ── Primary TTS: Kokoro/Svara ─────────────────
-        if self.language.lower() == "hindi" and SVARA_AVAILABLE:
-            print("[TTS] Primary: Svara HF Spaces for Hindi")
-            self._use_kokoro = False
-            self._kokoro = None
-            self._use_svara = True
-            self._svara = SvaraTTS(language="Hindi (हिन्दी)")
+        # ── Primary TTS: Fal / Kokoro / Svara ─────────────────
+        fal_key = getattr(settings, "FAL_KEY", None)
+        self._use_fal_kokoro = False
+        self._fal_kokoro = None
+        self._use_kokoro = False
+        self._kokoro = None
+        self._use_svara = False
+        self._svara = None
+
+        if self.language.lower() == "hindi":
+            if fal_key:
+                print("[TTS] Primary: Fal AI Kokoro for Hindi (voice=hm_omega)")
+                self._use_fal_kokoro = True
+                self._fal_kokoro = FalKokoroHindiTTS(voice="hm_omega")
+            elif SVARA_AVAILABLE:
+                print("[TTS] Primary: Svara HF Spaces for Hindi")
+                self._use_svara = True
+                self._svara = SvaraTTS(language="Hindi (हिन्दी)")
+            else:
+                print("[TTS] Falling back to Deepgram TTS for Hindi")
         elif KOKORO_AVAILABLE:
             kokoro_voice = getattr(settings, "KOKORO_VOICE", "af_heart")
             print(f"[TTS] Primary: Kokoro HF Spaces (voice={kokoro_voice})")
             self._use_kokoro = True
             self._kokoro = KokoroTTS(voice=kokoro_voice)
-            self._use_svara = False
-            self._svara = None
         else:
             print("[TTS] Falling back to Deepgram TTS")
-            self._use_kokoro = False
-            self._kokoro = None
-            self._use_svara = False
-            self._svara = None
 
         # ── LLMs (all Groq for speed + reliability) ────────────────────────
         self.router_llm_primary = ChatGroq(
@@ -516,10 +584,10 @@ class VoiceProcessor:
         asyncio.create_task(self.dg_connection.start_listening())
 
     async def _start_tts(self):
-        # Only start Deepgram if neither Kokoro nor Svara is active
-        if not self._use_kokoro and not getattr(self, "_use_svara", False):
+        # Only start Deepgram if neither Fal, Kokoro nor Svara is active
+        if not getattr(self, "_use_fal_kokoro", False) and not self._use_kokoro and not getattr(self, "_use_svara", False):
             await self._start_deepgram_tts()
-        # Kokoro and Svara are stateless — no persistent connection needed
+        # Fal, Kokoro, and Svara are stateless — no persistent connection needed
 
     async def _start_deepgram_tts(self):
         if not self.deepgram:
@@ -577,8 +645,22 @@ class VoiceProcessor:
     async def generate_speech(self, text: str):
         clean_text = self._sanitize_for_speech(text)
 
-        # ── Primary: Svara/Kokoro (HF Spaces) ──────────────────────────────────
-        if getattr(self, "_use_svara", False) and self._svara:
+        # ── Primary: Fal / Svara / Kokoro ──────────────────────────────────
+        if getattr(self, "_use_fal_kokoro", False) and getattr(self, "_fal_kokoro", None):
+            try:
+                print("[TTS] Synthesizing with Fal AI Kokoro (Hindi)...")
+                pcm = await self._fal_kokoro.synthesize(clean_text)
+                if pcm:
+                    chunk_size = 4096
+                    for i in range(0, len(pcm), chunk_size):
+                        await self.websocket.send_bytes(pcm[i : i + chunk_size])
+                    print(f"[TTS] Fal Kokoro sent {len(pcm)} bytes")
+                    return
+                else:
+                    print("[TTS] Fal Kokoro returned empty – falling back to Deepgram")
+            except Exception as e:
+                print(f"[TTS] Fal Kokoro error: {e} – falling back to Deepgram")
+        elif getattr(self, "_use_svara", False) and self._svara:
             try:
                 print("[TTS] Synthesizing with Svara (Hindi)...")
                 pcm = await self._svara.synthesize(clean_text)
