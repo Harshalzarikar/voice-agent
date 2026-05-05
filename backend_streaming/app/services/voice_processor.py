@@ -357,20 +357,36 @@ class SvaraTTS:
 # ─────────────────────────────────────────────
 #  Fal Kokoro Hindi TTS helper (via Fal AI)
 # ─────────────────────────────────────────────
+# Valid Hindi voices for fal-ai/kokoro/hindi
+# hf_alpha = Hindi Female Alpha
+# hf_beta  = Hindi Female Beta
+# hm_omega = Hindi Male Omega
+# hm_psi   = Hindi Male Psi
+FAL_HINDI_VOICES = {"hf_alpha", "hf_beta", "hm_omega", "hm_psi"}
+
 class FalKokoroHindiTTS:
     """
     Calls the fal-ai/kokoro/hindi model via Fal API.
+    Supports all 4 Hindi voices: hf_alpha, hf_beta, hm_omega, hm_psi.
     Returns raw PCM bytes (16-bit, mono).
     """
+    DEFAULT_VOICE = "hm_omega"
+
     def __init__(self, voice: str = "hm_omega"):
-        self._voice = voice
+        # Validate the voice — fall back to default if invalid
+        if voice in FAL_HINDI_VOICES:
+            self._voice = voice
+        else:
+            print(f"[TTS] Unknown Fal Hindi voice '{voice}'. Using default '{self.DEFAULT_VOICE}'.")
+            self._voice = self.DEFAULT_VOICE
+        print(f"[TTS] FalKokoroHindiTTS initialized with voice='{self._voice}'")
 
     async def synthesize(self, text: str) -> bytes:
         fal_key = getattr(settings, "FAL_KEY", None)
         if not fal_key:
             print("[TTS] FAL_KEY missing. Please set FAL_KEY in your .env")
             return b""
-        
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 print(f"[TTS] Calling Fal AI Kokoro Hindi (voice={self._voice}) ...")
@@ -382,35 +398,37 @@ class FalKokoroHindiTTS:
                     },
                     json={
                         "prompt": text,
-                        "voice": self._voice
+                        "voice": self._voice,
+                        "speed": 1.0
                     }
                 )
                 response.raise_for_status()
                 data = response.json()
                 audio_url = data.get("audio", {}).get("url")
-                
+
                 if not audio_url:
                     print("[TTS] Fal AI returned no audio URL")
                     return b""
-                    
-                # Download audio
+
+                # Download audio bytes
                 audio_resp = await client.get(audio_url)
                 audio_resp.raise_for_status()
                 audio_bytes = audio_resp.content
-                
-                # Convert to PCM using soundfile
+
+                # Decode WAV → raw 16-bit PCM mono
                 import soundfile as sf
-                import io
+                import io as _io
                 import numpy as np
-                
-                with io.BytesIO(audio_bytes) as f:
-                    audio_data, sample_rate = sf.read(f)
-                    
-                # Ensure it's mono
-                if len(audio_data.shape) > 1:
+
+                with _io.BytesIO(audio_bytes) as buf:
+                    audio_data, sample_rate = sf.read(buf)
+
+                # Downmix to mono if stereo
+                if audio_data.ndim > 1:
                     audio_data = audio_data.mean(axis=1)
-                
+
                 pcm16 = (audio_data * 32767).clip(-32768, 32767).astype(np.int16)
+                print(f"[TTS] Fal Kokoro done: {len(pcm16)*2} bytes at {sample_rate}Hz")
                 return pcm16.tobytes()
         except Exception as e:
             print(f"[TTS] Fal AI Kokoro error: {e}")
@@ -466,9 +484,12 @@ class VoiceProcessor:
 
         if self.language.lower() == "hindi":
             if fal_key:
-                print("[TTS] Primary: Fal AI Kokoro for Hindi (voice=hm_omega)")
+                # Use the voice_id from the agent config if it's a valid Hindi voice,
+                # otherwise fall back to the default hm_omega
+                hindi_voice = voice_id if voice_id in FAL_HINDI_VOICES else "hm_omega"
+                print(f"[TTS] Primary: Fal AI Kokoro for Hindi (voice={hindi_voice})")
                 self._use_fal_kokoro = True
-                self._fal_kokoro = FalKokoroHindiTTS(voice="hm_omega")
+                self._fal_kokoro = FalKokoroHindiTTS(voice=hindi_voice)
             elif SVARA_AVAILABLE:
                 print("[TTS] Primary: Svara HF Spaces for Hindi")
                 self._use_svara = True
@@ -826,9 +847,11 @@ Do not output thinking or markdown. Just the JSON.
             asyncio.create_task(self.save_message("assistant", response_text))
             print(f"[process_text] Response: {response_text}")
 
+            # Send text to frontend immediately, then stream audio
             await self.websocket.send_text(
                 json.dumps({"type": "text", "role": "assistant", "content": response_text})
             )
+            # Generate and stream speech (runs right after text is sent)
             await self.generate_speech(response_text)
 
         except Exception as e:
