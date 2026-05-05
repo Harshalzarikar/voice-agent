@@ -24,43 +24,35 @@ export const login = async (username, password) => {
   return response.json();
 };
 
-export const getAgents = async (token) => {
-  const response = await fetch(`${API_BASE}/api/agents/`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (response.status === 401) throw new Error("401 Unauthorized");
+export const getAgents = async () => {
+  const response = await fetch(`${API_BASE}/api/agents/`);
   if (!response.ok) throw new Error("Failed to fetch agents");
   return response.json();
 };
 
-export const createAgent = async (token, agentData) => {
+export const createAgent = async (agentData) => {
   const response = await fetch(`${API_BASE}/api/agents/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(agentData),
   });
-  if (response.status === 401) throw new Error("401 Unauthorized");
   if (!response.ok) throw new Error("Failed to create agent");
   return response.json();
 };
 
-export const getSessions = async (token, agentId) => {
-  const response = await fetch(`${API_BASE}/api/sessions/?agent=${agentId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export const getSessions = async (agentId) => {
+  const response = await fetch(`${API_BASE}/api/sessions/?agent=${agentId}`);
   if (!response.ok) throw new Error("Failed to fetch sessions");
   return response.json();
 };
 
-export const createSession = async (token, agentId) => {
+export const createSession = async (agentId) => {
   const response = await fetch(`${API_BASE}/api/sessions/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ agent: agentId }),
   });
@@ -68,10 +60,9 @@ export const createSession = async (token, agentId) => {
   return response.json();
 };
 
-export const deleteSession = async (token, sessionId) => {
+export const deleteSession = async (sessionId) => {
   const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) throw new Error("Failed to delete session");
   return true;
@@ -88,13 +79,17 @@ export const register = async (username, password, email = "") => {
   return data;
 };
 
-export const getWebSocketUrl = (agentId, token, sessionId, language) => {
-  let url = `${WS_BASE}/ws/chat/${agentId}?token=${token}`;
+export const getWebSocketUrl = (agentId, sessionId, language) => {
+  let url = `${WS_BASE}/ws/chat/${agentId}?`;
   if (sessionId) {
-    url += `&session=${sessionId}`;
+    url += `session=${sessionId}&`;
   }
   if (language) {
-    url += `&language=${encodeURIComponent(language)}`;
+    url += `language=${encodeURIComponent(language)}&`;
+  }
+  // remove trailing & or ?
+  if (url.endsWith("&") || url.endsWith("?")) {
+    url = url.slice(0, -1);
   }
   return url;
 };

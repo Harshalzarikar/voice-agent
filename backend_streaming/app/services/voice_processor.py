@@ -431,7 +431,7 @@ class FalKokoroHindiTTS:
                 print(f"[TTS] Fal Kokoro done: {len(pcm16)*2} bytes at {sample_rate}Hz")
                 return pcm16.tobytes()
         except Exception as e:
-            print(f"[TTS] Fal AI Kokoro error: {e}")
+            print(f"[TTS] Fal AI Kokoro error: {type(e).__name__} - {str(e)}")
             return b""
 
 
@@ -445,7 +445,6 @@ class VoiceProcessor:
         websocket,
         system_prompt: str,
         voice_id: str,
-        token: str = None,
         session_id: str = None,
         language: str = "English"
     ):
@@ -453,7 +452,6 @@ class VoiceProcessor:
         self.websocket     = websocket
         self.system_prompt = system_prompt
         self.voice_id      = voice_id
-        self.auth_token    = token
         self.session_id    = session_id
         self.language      = language
 
@@ -724,7 +722,13 @@ class VoiceProcessor:
             print("[TTS] Deepgram TTS not connected – attempting lazy connect")
             try:
                 await self._start_deepgram_tts()
-                await self.generate_speech(text)
+                if self.dg_tts_connection:
+                    safe_text = clean_text[:1800]
+                    async with self.tts_lock:
+                        await self.dg_tts_connection.send_text(
+                            SpeakV1TextMessage(type="Speak", text=safe_text)
+                        )
+                        await self.dg_tts_connection.send_control(SpeakV1ControlMessage(type="Flush"))
             except Exception as e:
                 print(f"[TTS] Deepgram fallback failed: {e}")
 

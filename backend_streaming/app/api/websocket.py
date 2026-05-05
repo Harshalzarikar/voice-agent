@@ -7,8 +7,7 @@ router = APIRouter()
 
 @router.websocket("/chat/{agent_id}")
 async def websocket_endpoint(websocket: WebSocket, agent_id: str):
-    # Extract token and session from query params
-    token = websocket.query_params.get("token")
+    # Extract session from query params
     session_id = websocket.query_params.get("session")
     language = websocket.query_params.get("language", "English")
     
@@ -19,15 +18,8 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     voice_id = "aura-asteria-en"
     
     try:
-        headers = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-            
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"http://localhost:8000/api/agents/{agent_id}/",
-                headers=headers
-            )
+            resp = await client.get(f"http://localhost:8000/api/agents/{agent_id}/")
             if resp.status_code == 200:
                 data = resp.json()
                 system_prompt = data.get("system_prompt", system_prompt)
@@ -38,36 +30,32 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     except Exception as e:
         print(f"Error fetching agent {agent_id}: {e}")
 
-    # Initialize processor with token and session
-    processor = VoiceProcessor(agent_id, websocket, system_prompt, voice_id, token, session_id, language)
+    # Initialize processor with session
+    processor = VoiceProcessor(agent_id, websocket, system_prompt, voice_id, session_id=session_id, language=language)
     
     # Load previous history for this session
     try:
-        if token:
-            url = f"http://localhost:8000/api/messages/?agent={agent_id}&format=json"
-            if session_id:
-                url += f"&session={session_id}"
+        url = f"http://localhost:8000/api/messages/?agent={agent_id}&format=json"
+        if session_id:
+            url += f"&session={session_id}"
+            
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                messages = resp.json()
+                # Convert to LangChain messages
+                for msg in messages:
+                    if msg['role'] == 'user':
+                        processor.conversation_history.append(HumanMessage(content=msg['content']))
+                    elif msg['role'] == 'assistant':
+                        processor.conversation_history.append(AIMessage(content=msg['content']))
+                print(f"Loaded {len(messages)} past messages for context")
                 
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                if resp.status_code == 200:
-                    messages = resp.json()
-                    # Convert to LangChain messages
-                    for msg in messages:
-                        if msg['role'] == 'user':
-                            processor.conversation_history.append(HumanMessage(content=msg['content']))
-                        elif msg['role'] == 'assistant':
-                            processor.conversation_history.append(AIMessage(content=msg['content']))
-                    print(f"Loaded {len(messages)} past messages for context")
-                    
-                    # Send history to frontend
-                    await websocket.send_json({
-                        "type": "history",
-                        "messages": messages
-                    })
+                # Send history to frontend
+                await websocket.send_json({
+                    "type": "history",
+                    "messages": messages
+                })
     except Exception as e:
         print(f"Error loading history: {e}")
 

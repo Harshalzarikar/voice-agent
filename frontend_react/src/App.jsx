@@ -1,57 +1,13 @@
-import { useState, useEffect } from "react";
-import Login from "./components/Login";
-import Register from "./components/Register";
+import { useState } from "react";
 import Dashboard from "./components/Dashboard";
 import VoiceChat from "./components/VoiceChat";
 import "./App.css";
 
 function App() {
-  const [token, setToken] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [user, setUser] = useState(null);
-  const [authView, setAuthView] = useState("login"); // "login" or "register"
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem("token");
-    const savedUser = localStorage.getItem("user");
-    if (savedToken) {
-      setToken(savedToken);
-      if (savedUser) setUser(JSON.parse(savedUser));
-    }
-  }, []);
-
-  const handleLogin = (accessToken, username) => {
-    localStorage.setItem("token", accessToken);
-    localStorage.setItem("user", JSON.stringify({ username }));
-    setToken(accessToken);
-    setUser({ username });
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setToken(null);
-    setUser(null);
-    setSelectedAgent(null);
-    setAuthView("login");
-  };
-
-  if (!token) {
-    if (authView === "register") {
-      return (
-        <Register
-          onLogin={handleLogin}
-          onSwitchToLogin={() => setAuthView("login")}
-        />
-      );
-    }
-    return (
-      <Login
-        onLogin={handleLogin}
-        onSwitchToRegister={() => setAuthView("register")}
-      />
-    );
-  }
+  
+  // Dummy user since login is removed
+  const user = { username: "Guest" };
 
   if (selectedAgent) {
     return (
@@ -59,17 +15,17 @@ function App() {
         agent={selectedAgent}
         user={user}
         onBack={() => setSelectedAgent(null)}
-        onLogout={handleLogout}
+        onLogout={() => {}} // No-op since there's no auth
       />
     );
   }
 
   return (
     <Dashboard
-      token={token}
+      token={null}
       user={user}
       onSelectAgent={setSelectedAgent}
-      onLogout={handleLogout}
+      onLogout={() => {}} // No-op
     />
   );
 }

@@ -1,6 +1,6 @@
 import "./Header.css";
 
-function Header({ user, onLogout }) {
+function Header({ user }) {
   const getInitials = (name) => {
     return name ? name.charAt(0).toUpperCase() : "U";
   };
@@ -14,11 +14,8 @@ function Header({ user, onLogout }) {
       <div className="header-right">
         <div className="user-info">
           <div className="user-avatar">{getInitials(user?.username)}</div>
-          <span className="user-name">{user?.username || "User"}</span>
+          <span className="user-name">{user?.username || "Guest"}</span>
         </div>
-        <button className="logout-btn" onClick={onLogout}>
-          Logout
-        </button>
       </div>
     </header>
   );

@@ -26,8 +26,7 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
 
   const loadSessions = async () => {
     try {
-      const token = localStorage.getItem("token");
-      const data = await getSessions(token, agent.id);
+      const data = await getSessions(agent.id);
       setSessions(data);
       
       if (data.length > 0) {
@@ -44,8 +43,7 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
 
   const createNewSession = async () => {
     try {
-      const token = localStorage.getItem("token");
-      const newSession = await createSession(token, agent.id);
+      const newSession = await createSession(agent.id);
       setSessions(prev => [newSession, ...prev]);
       selectSession(newSession.id);
     } catch (err) {
@@ -57,8 +55,7 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     if (!window.confirm("Are you sure you want to delete this chat history?")) return;
     
     try {
-      const token = localStorage.getItem("token");
-      await deleteSession(token, sessionId);
+      await deleteSession(sessionId);
       
       const updatedSessions = sessions.filter(s => s.id !== sessionId);
       setSessions(updatedSessions);
@@ -89,11 +86,10 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
   };
 
   const connectWebSocket = (sessionId, langOverride = null) => {
-    const token = localStorage.getItem("token");
     const activeLang = langOverride || language;
     setStatus("connecting");
     
-    const ws = new WebSocket(getWebSocketUrl(agent.id, token, sessionId, activeLang));
+    const ws = new WebSocket(getWebSocketUrl(agent.id, sessionId, activeLang));
     wsRef.current = ws;
 
     ws.onopen = () => {

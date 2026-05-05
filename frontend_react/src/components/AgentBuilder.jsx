@@ -20,7 +20,7 @@ const VOICES = [
   { id: "aura-aura-hi", name: "Hindi", type: "Indian Accent", emoji: "🇮🇳", lang: "Hindi" },
 ];
 
-function AgentBuilder({ token, onClose, onCreated }) {
+function AgentBuilder({ onClose, onCreated }) {
   const [name, setName] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [voiceId, setVoiceId] = useState("aura-asteria-en");
@@ -40,7 +40,7 @@ function AgentBuilder({ token, onClose, onCreated }) {
     setError("");
 
     try {
-      const agent = await createAgent(token, {
+      const agent = await createAgent({
         name: name.trim(),
         system_prompt: systemPrompt.trim(),
         voice_id: voiceId,

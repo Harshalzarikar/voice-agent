@@ -21,14 +21,14 @@ const VOICE_EMOJIS = {
 
 const AGENT_ICONS = ["🤖", "🧠", "💬", "🎯", "🚀", "✨", "🔮", "💡"];
 
-function Dashboard({ token, user, onSelectAgent, onLogout }) {
+function Dashboard({ user, onSelectAgent, onLogout }) {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
 
   const fetchAgents = async () => {
     try {
-      const data = await getAgents(token);
+      const data = await getAgents();
       setAgents(data);
     } catch (err) {
       console.error("Failed to load agents:", err);
@@ -42,7 +42,7 @@ function Dashboard({ token, user, onSelectAgent, onLogout }) {
 
   useEffect(() => {
     fetchAgents();
-  }, [token]);
+  }, []);
 
   const handleAgentCreated = (newAgent) => {
     setAgents((prev) => [...prev, newAgent]);
@@ -161,7 +161,6 @@ function Dashboard({ token, user, onSelectAgent, onLogout }) {
       {/* Agent Builder Modal */}
       {showBuilder && (
         <AgentBuilder
-          token={token}
           onClose={() => setShowBuilder(false)}
           onCreated={handleAgentCreated}
         />
