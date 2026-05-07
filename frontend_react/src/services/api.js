@@ -93,3 +93,9 @@ export const getWebSocketUrl = (agentId, sessionId, language) => {
   }
   return url;
 };
+
+export const getLiveKitToken = async (roomName, username) => {
+  const response = await fetch(`${API_BASE}/api/livekit-token/?room=${encodeURIComponent(roomName)}&username=${encodeURIComponent(username)}`);
+  if (!response.ok) throw new Error("Failed to get LiveKit token");
+  return response.json();
+};

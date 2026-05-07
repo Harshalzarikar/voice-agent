@@ -1,25 +1,139 @@
-import { useState, useRef, useEffect } from "react";
-import { getWebSocketUrl, getSessions, createSession, deleteSession } from "../services/api";
+import { useState, useEffect } from "react";
+import { getSessions, createSession, deleteSession, getLiveKitToken } from "../services/api";
+import {
+  LiveKitRoom,
+  RoomAudioRenderer,
+  BarVisualizer,
+  VoiceAssistantControlBar,
+  useVoiceAssistant,
+  useRoomContext,
+} from "@livekit/components-react";
+import { RoomEvent } from "livekit-client";
+import "@livekit/components-styles";
 import "./VoiceChat.css";
 
-function VoiceChat({ agent, user, onBack, onLogout }) {
-  const [status, setStatus] = useState("connecting");
-  const [isListening, setIsListening] = useState(false);
+// A small component to show the assistant status inside the LiveKitRoom
+function AssistantStatus() {
+  const { state, audioTrack } = useVoiceAssistant();
+  
+  const getStateText = () => {
+    switch (state) {
+      case "connecting": return "Connecting...";
+      case "listening": return "Listening...";
+      case "thinking": return "Thinking...";
+      case "speaking": return "Speaking...";
+      case "ready": return "Ready (Say hello)";
+      default: return state;
+    }
+  };
+
+  return (
+    <div className="assistant-status-container" style={{ textAlign: 'center', margin: '10px 0' }}>
+      <div className="status-text" style={{ fontSize: '18px', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+        {getStateText()}
+      </div>
+      <div style={{ height: '60px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <BarVisualizer state={state} barCount={7} trackRef={audioTrack} style={{ height: '40px' }} />
+      </div>
+    </div>
+  );
+}
+
+// A new component to display real-time speech-to-text transcriptions for both user and agent
+function TranscriptsView() {
+  const room = useRoomContext();
   const [messages, setMessages] = useState([]);
+
+  useEffect(() => {
+    if (!room) return;
+    
+    // We store transcript segments in a dictionary to update them as they stream
+    const transcriptMap = new Map();
+
+    const handleTranscription = (segments, participant) => {
+      setMessages(prev => {
+        const newMessages = [...prev];
+        
+        for (const segment of segments) {
+          const isAgent = participant?.isAgent || participant?.identity?.includes('agent') || !participant;
+          const msgId = segment.id;
+          
+          const existingIdx = newMessages.findIndex(m => m.id === msgId);
+          const msg = {
+            id: msgId,
+            text: segment.text,
+            isAgent,
+            isFinal: segment.final,
+            name: participant?.name || (isAgent ? "Agent" : "You"),
+            timestamp: Date.now()
+          };
+
+          if (existingIdx >= 0) {
+            newMessages[existingIdx] = msg;
+          } else {
+            newMessages.push(msg);
+          }
+        }
+        
+        // Keep only the last 50 messages to prevent memory bloat
+        return newMessages.sort((a, b) => a.timestamp - b.timestamp).slice(-50);
+      });
+    };
+
+    room.on(RoomEvent.TranscriptionReceived, handleTranscription);
+    
+    return () => {
+      room.off(RoomEvent.TranscriptionReceived, handleTranscription);
+    };
+  }, [room]);
+
+  return (
+    <div style={{ 
+      flex: 1, 
+      width: '100%', 
+      maxWidth: '600px', 
+      overflowY: 'auto', 
+      padding: '20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px'
+    }}>
+      {messages.length === 0 && (
+        <div style={{ textAlign: 'center', color: '#888', marginTop: '20px' }}>
+          Say something to start the conversation...
+        </div>
+      )}
+      {messages.map(msg => (
+        <div key={msg.id} style={{ 
+          alignSelf: msg.isAgent ? 'flex-start' : 'flex-end',
+          backgroundColor: msg.isAgent ? '#2c2c2e' : '#0a84ff',
+          color: 'white',
+          padding: '10px 16px',
+          borderRadius: '18px',
+          maxWidth: '80%',
+          opacity: msg.isFinal ? 1 : 0.7,
+          boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+          transition: 'opacity 0.2s'
+        }}>
+          <div style={{ fontSize: '11px', opacity: 0.6, marginBottom: '4px' }}>{msg.name}</div>
+          <div style={{ fontSize: '15px', lineHeight: '1.4' }}>{msg.text}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VoiceChat({ agent, user, onBack, onLogout }) {
   const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [inputText, setInputText] = useState("");
   const [language, setLanguage] = useState("English");
   
-  const wsRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const audioQueueRef = useRef([]);
-  const isPlayingRef = useRef(false);
-  const currentAudioSourceRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  // LiveKit connection state
+  const [lkToken, setLkToken] = useState("");
+  const [lkUrl, setLkUrl] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
 
-  // Load Component: Fetch Sessions -> Create New or Load Most Recent
   useEffect(() => {
     loadSessions();
   }, [agent.id]);
@@ -28,12 +142,9 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     try {
       const data = await getSessions(agent.id);
       setSessions(data);
-      
       if (data.length > 0) {
-        // Load most recent session
         selectSession(data[0].id);
       } else {
-        // Create first session
         createNewSession();
       }
     } catch (err) {
@@ -53,13 +164,10 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
 
   const handleDeleteSession = async (sessionId) => {
     if (!window.confirm("Are you sure you want to delete this chat history?")) return;
-    
     try {
       await deleteSession(sessionId);
-      
       const updatedSessions = sessions.filter(s => s.id !== sessionId);
       setSessions(updatedSessions);
-      
       if (currentSessionId === sessionId) {
         if (updatedSessions.length > 0) {
           selectSession(updatedSessions[0].id);
@@ -72,235 +180,34 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
     }
   };
 
-  const selectSession = (sessionId, forceReconnect = false, langOverride = null) => {
-    if (currentSessionId === sessionId && !forceReconnect) return;
-    
-    // Close existing connection
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-    
-    setMessages([]); // Clear explicit state, will load from WS history
+  const selectSession = (sessionId) => {
+    if (currentSessionId === sessionId) return;
     setCurrentSessionId(sessionId);
-    connectWebSocket(sessionId, langOverride);
+    // When session changes, we disconnect LiveKit
+    disconnectLiveKit();
   };
 
-  const connectWebSocket = (sessionId, langOverride = null) => {
-    const activeLang = langOverride || language;
-    setStatus("connecting");
-    
-    const ws = new WebSocket(getWebSocketUrl(agent.id, sessionId, activeLang));
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setStatus("connected");
-    };
-
-    ws.onmessage = async (event) => {
-      if (event.data instanceof Blob) {
-        const arrayBuffer = await event.data.arrayBuffer();
-        audioQueueRef.current.push(arrayBuffer);
-        if (!isPlayingRef.current) {
-          playAudioQueue();
-        }
-      } else {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "text") {
-            if (data.role === "assistant" || data.role === "user") {
-               addMessage(data.content, data.role);
-            }
-          } else if (data.type === "history") {
-             if (data.messages && data.messages.length > 0) {
-                 const history = data.messages.map(msg => ({
-                   text: msg.content,
-                   sender: msg.role,
-                   time: new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                 }));
-                 setMessages(history);
-             }
-          } else if (data.type === "control" && data.action === "stop_audio") {
-             stopAudioPlayback();
-          }
-        } catch (e) {
-          console.error("Error parsing message", e);
-        }
-      }
-    };
-
-    ws.onclose = () => setStatus("disconnected");
-    ws.onerror = () => setStatus("error");
+  const disconnectLiveKit = () => {
+    setLkToken("");
+    setLkUrl("");
+    setIsConnected(false);
   };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-      stopListening();
-    };
-  }, []);
-
-  const addMessage = (text, sender) => {
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((prev) => [...prev, { time, text, sender }]);
-  };
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const sendTextMessage = () => {
-    if (!inputText.trim() || !wsRef.current) return;
-    
-    // Optimistically add user message
-    addMessage(inputText, 'user');
-    
-    // Send to backend
-    wsRef.current.send(JSON.stringify({
-      type: "text",
-      content: inputText
-    }));
-    
-    setInputText("");
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      sendTextMessage();
-    }
-  };
-
-  const stopAudioPlayback = () => {
-    audioQueueRef.current = [];
-    isPlayingRef.current = false;
-    if (currentAudioSourceRef.current) {
-      try {
-        currentAudioSourceRef.current.stop();
-      } catch (e) {
-        // Ignore errors if already stopped
-      }
-      currentAudioSourceRef.current = null;
-    }
-  };
-
-  const playAudioQueue = async () => {
-    if (audioQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      return;
-    }
-    isPlayingRef.current = true;
-
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 24000,
-      });
-    }
-
-    const arrayBuffer = audioQueueRef.current.shift();
-    const int16Array = new Int16Array(arrayBuffer);
-    const float32Array = new Float32Array(int16Array.length);
-    for (let i = 0; i < int16Array.length; i++) {
-      float32Array[i] = int16Array[i] / 32768.0;
-    }
-
-    const audioBuffer = audioContextRef.current.createBuffer(1, float32Array.length, 24000);
-    audioBuffer.getChannelData(0).set(float32Array);
-
-    const source = audioContextRef.current.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContextRef.current.destination);
-    source.onended = () => {
-      currentAudioSourceRef.current = null;
-      playAudioQueue();
-    };
-    source.start();
-    currentAudioSourceRef.current = source;
-  };
-
-  const micStreamRef = useRef(null);
-  const scriptNodeRef = useRef(null);
-  const micSourceRef = useRef(null);
-
-  const startListening = async () => {
+  const connectToLiveKit = async () => {
+    setIsConnecting(true);
     try {
-      // Create a dedicated AudioContext at 16kHz for mic capture
-      const micContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
-      });
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      micStreamRef.current = stream;
-
-      const source = micContext.createMediaStreamSource(stream);
-      micSourceRef.current = source;
-
-      // Buffer size 4096 at 16kHz ≈ 256ms chunks
-      const scriptNode = micContext.createScriptProcessor(4096, 1, 1);
-      scriptNodeRef.current = scriptNode;
-
-      scriptNode.onaudioprocess = (e) => {
-        if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-        const float32 = e.inputBuffer.getChannelData(0);
-        // Convert float32 → int16 PCM
-        const int16 = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
-          const s = Math.max(-1, Math.min(1, float32[i]));
-          int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-        }
-        wsRef.current.send(int16.buffer);
-      };
-
-      source.connect(scriptNode);
-      scriptNode.connect(micContext.destination);
-
-      // Also ensure playback AudioContext exists
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 24000,
-        });
-      } else {
-        await audioContextRef.current.resume();
-      }
-
-      setIsListening(true);
-      setStatus("listening");
-    } catch (err) {
-      console.error("Microphone error:", err);
-    }
-  };
-
-  const stopListening = () => {
-    if (scriptNodeRef.current) {
-      scriptNodeRef.current.disconnect();
-      scriptNodeRef.current = null;
-    }
-    if (micSourceRef.current) {
-      micSourceRef.current.disconnect();
-      micSourceRef.current = null;
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-    }
-    setIsListening(false);
-    setStatus("connected");
-  };
-
-  const getStatusText = () => {
-    switch (status) {
-      case "connecting": return "Connecting...";
-      case "connected": return "Online";
-      case "listening": return "Listening...";
-      case "disconnected": return "Disconnected";
-      case "error": return "Connection Error";
-      default: return status;
+      const roomName = `room-${agent.id}-${currentSessionId}`;
+      const username = user?.username || "Guest";
+      
+      const data = await getLiveKitToken(roomName, username);
+      setLkToken(data.token);
+      setLkUrl(data.url);
+      setIsConnected(true);
+    } catch (error) {
+      console.error("LiveKit connection error:", error);
+      alert("Failed to connect to Voice Assistant.");
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -356,108 +263,62 @@ function VoiceChat({ agent, user, onBack, onLogout }) {
             <div className="details">
               <h2>{agent.name}</h2>
               <div className="status">
-                <span className={`status-dot ${status === 'listening' ? 'pulse' : ''}`}></span>
-                {getStatusText()}
+                <span className={`status-dot ${isConnected ? 'pulse' : ''}`} style={{ backgroundColor: isConnected ? 'green' : 'gray' }}></span>
+                {isConnected ? 'Online' : 'Offline'}
               </div>
             </div>
           </div>
           <div className="language-selector">
-            <button 
-              className={`lang-btn ${language === 'English' ? 'active' : ''}`}
-              onClick={() => {
-                setLanguage('English');
-                if (currentSessionId) {
-                  selectSession(currentSessionId, true, 'English');
-                }
-              }}
-            >
-              EN
-            </button>
-            <button 
-              className={`lang-btn ${language === 'Hindi' ? 'active' : ''}`}
-              onClick={() => {
-                setLanguage('Hindi');
-                if (currentSessionId) {
-                  selectSession(currentSessionId, true, 'Hindi');
-                }
-              }}
-            >
-              HI
-            </button>
+            <button className="lang-btn active">EN</button>
+            <button className="lang-btn">HI</button>
           </div>
         </div>
 
-        {/* Messages */}
+        {/* LiveKit Interface */}
         <div className="voice-main">
-          {status === "connecting" && messages.length === 0 ? (
-            <div className="connecting-state">
-              <div className="connecting-spinner"></div>
-              <p style={{ color: "var(--text-secondary)" }}>Connecting to server...</p>
+          {!isConnected ? (
+            <div className="chat-empty-state" style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="icon">🎙️</div>
+              <h3>Ready to speak?</h3>
+              <p>Click below to connect to the agent</p>
+              <button 
+                onClick={connectToLiveKit} 
+                disabled={isConnecting}
+                style={{
+                  marginTop: '20px',
+                  padding: '12px 24px',
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '24px',
+                  fontSize: '16px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                {isConnecting ? "Connecting..." : "Start Call"}
+              </button>
             </div>
           ) : (
-            <>
-              <div className="chat-container">
-                {messages.length === 0 ? (
-                  <div className="chat-empty-state">
-                    <div className="icon">👋</div>
-                    <h3>Start talking</h3>
-                    <p>Tap the microphone below</p>
-                  </div>
-                ) : (
-                  messages.map((msg, i) => (
-                    <div key={i} className={`message ${msg.sender}`}>
-                      <div className="message-content">
-                        {msg.text}
-                      </div>
-                      <div className="message-meta">
-                        {msg.time}
-                      </div>
-                    </div>
-                  ))
-                )}
-                <div ref={messagesEndRef} />
+            <LiveKitRoom
+              token={lkToken}
+              serverUrl={lkUrl}
+              connect={true}
+              audio={true}
+              video={false}
+              onDisconnected={disconnectLiveKit}
+              style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', alignItems: 'center', justifyContent: 'flex-start' }}
+            >
+              <RoomAudioRenderer />
+              
+              <TranscriptsView />
+              
+              <AssistantStatus />
+              
+              <div style={{ marginTop: 'auto', marginBottom: '40px' }}>
+                <VoiceAssistantControlBar />
               </div>
-
-              <div className="voice-controls-container">
-                <div className={`waveform-mini ${isListening ? 'active' : ''}`}>
-                  <div className="bar"></div>
-                  <div className="bar"></div>
-                  <div className="bar"></div>
-                  <div className="bar"></div>
-                  <div className="bar"></div>
-                </div>
-
-                <div className="controls-row">
-                  <div className="text-input-wrapper">
-                    <input
-                      type="text"
-                      placeholder="Type a message..."
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      disabled={isListening}
-                    />
-                    <button onClick={sendTextMessage} disabled={!inputText.trim() || isListening}>
-                      ➤
-                    </button>
-                  </div>
-
-                  <div className={`mic-wrapper ${isListening ? 'listening' : ''}`}>
-                    <div className="mic-ripple"></div>
-                    <button
-                      className={`mic-button ${isListening ? 'active' : ''}`}
-                      onClick={isListening ? stopListening : startListening}
-                    >
-                      {isListening ? '⏹️' : '🎤'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="instruction-text">
-                  {isListening ? "Listening..." : "Type or tap mic to speak"}
-                </div>
-              </div>
-            </>
+            </LiveKitRoom>
           )}
         </div>
       </div>

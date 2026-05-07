@@ -24,3 +24,4 @@ faster-whisper
 # Database (Supabase / Postgres)
 dj-database-url
 psycopg2-binary
+livekit-api

@@ -29,9 +29,12 @@ from django.http import JsonResponse
 def ping(request):
     return JsonResponse({"status": "alive"})
 
+from agents.views import get_livekit_token
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/livekit-token/', get_livekit_token, name='livekit_token'),
     path('ping/', ping, name='ping'),
 ]
 
