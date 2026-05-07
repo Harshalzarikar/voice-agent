@@ -1,0 +1,22 @@
+services:
+  # 1. Django API Service
+  - type: web
+    name: voice-agent-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn backend_core.config.wsgi:application --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - fromGroup: voice-agent-secrets
+
+  # 2. LiveKit Agent Worker (The Voice logic)
+  - type: worker
+    name: voice-agent-worker
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python backend_streaming/agent.py start
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - fromGroup: voice-agent-secrets
