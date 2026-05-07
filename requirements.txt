@@ -14,14 +14,18 @@ requests
 websockets==13.1
 gunicorn
 httpx
-# TTS: Kokoro via HuggingFace Spaces
-gradio_client
 soundfile
 numpy
-# STT: Local Whisper (requires ffmpeg system package)
-faster-whisper
 
 # Database (Supabase / Postgres)
 dj-database-url
 psycopg2-binary
+
+# LiveKit — Django token endpoint
 livekit-api
+
+# LiveKit — Agent Worker
+livekit-agents>=1.5.0
+livekit-plugins-deepgram>=1.5.0
+livekit-plugins-openai>=1.5.0
+livekit-plugins-silero>=1.5.0
