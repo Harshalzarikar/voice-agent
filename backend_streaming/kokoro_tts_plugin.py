@@ -1,0 +1,120 @@
+"""
+Custom LiveKit TTS Plugin that wraps FalKokoroHindiTTS.
+This allows using fal-ai/kokoro/hindi inside AgentSession.
+Compatible with livekit-agents v1.5+
+"""
+import io
+import os
+import asyncio
+import httpx
+import numpy as np
+import soundfile as sf
+
+from livekit.agents import tts, utils
+from livekit.agents.types import APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
+
+
+SAMPLE_RATE = 24000  # Kokoro outputs 24kHz
+NUM_CHANNELS = 1
+
+
+class KokoroHindiTTS(tts.TTS):
+    """
+    LiveKit-compatible TTS plugin that calls fal-ai/kokoro/hindi.
+    Supports Hindi voices: hf_alpha, hf_beta, hm_omega, hm_psi
+    """
+
+    def __init__(
+        self,
+        *,
+        voice: str = "hf_alpha",
+        speed: float = 1.0,
+        fal_key: str | None = None,
+    ):
+        super().__init__(
+            capabilities=tts.TTSCapabilities(streaming=False),
+            sample_rate=SAMPLE_RATE,
+            num_channels=NUM_CHANNELS,
+        )
+        self._voice = voice
+        self._speed = speed
+        self._fal_key = fal_key or os.environ.get("FAL_KEY", "")
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> "KokoroHindiStream":
+        return KokoroHindiStream(
+            tts=self,
+            input_text=text,
+            conn_options=conn_options,
+        )
+
+
+class KokoroHindiStream(tts.ChunkedStream):
+    def __init__(
+        self,
+        *,
+        tts: KokoroHindiTTS,
+        input_text: str,
+        conn_options: APIConnectOptions,
+    ):
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
+        self._kokoro_tts = tts
+
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        text = self._input_text
+        fal_key = self._kokoro_tts._fal_key
+        voice = self._kokoro_tts._voice
+        speed = self._kokoro_tts._speed
+
+        if not fal_key:
+            raise RuntimeError("FAL_KEY is missing. Set it in your .env file.")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://fal.run/fal-ai/kokoro/hindi",
+                headers={
+                    "Authorization": f"Key {fal_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"prompt": text, "voice": voice, "speed": speed},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            audio_url = data.get("audio", {}).get("url")
+            if not audio_url:
+                raise RuntimeError(f"Fal AI returned no audio URL. Response: {data}")
+
+            audio_resp = await client.get(audio_url)
+            audio_resp.raise_for_status()
+            audio_bytes = audio_resp.content
+
+        # Decode the audio file to raw 16-bit PCM
+        with io.BytesIO(audio_bytes) as buf:
+            audio_data, sample_rate = sf.read(buf, dtype="int16")
+
+        # Downmix to mono if stereo
+        if audio_data.ndim > 1:
+            audio_data = audio_data.mean(axis=1).astype(np.int16)
+
+        pcm_bytes = audio_data.tobytes()
+
+        # Initialize emitter with actual sample rate from Fal response
+        output_emitter.initialize(
+            request_id=utils.shortuuid(),
+            sample_rate=sample_rate,
+            num_channels=NUM_CHANNELS,
+            mime_type="audio/pcm",
+        )
+
+        # Push in 100ms chunks so LiveKit can stream it out smoothly
+        CHUNK_SAMPLES = sample_rate // 10  # 100ms
+        chunk_bytes = CHUNK_SAMPLES * NUM_CHANNELS * 2  # 2 bytes per int16
+
+        for i in range(0, len(pcm_bytes), chunk_bytes):
+            output_emitter.push(pcm_bytes[i : i + chunk_bytes])
+
+        output_emitter.flush()
