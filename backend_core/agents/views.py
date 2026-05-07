@@ -46,31 +46,38 @@ class ChatMessageViewSet(viewsets.ModelViewSet):
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from livekit import api
 import os
 import uuid
 
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def get_livekit_token(request):
-    room_name = request.GET.get('room', 'test-room')
-    participant_name = request.GET.get('username', f'user-{uuid.uuid4().hex[:8]}')
-    
-    api_key = os.environ.get("LIVEKIT_API_KEY")
-    api_secret = os.environ.get("LIVEKIT_API_SECRET")
-    
-    if not api_key or not api_secret:
-        return Response({"error": "LiveKit credentials not configured. Please check .env"}, status=500)
+    try:
+        from livekit import api
+        room_name = request.GET.get('room', 'test-room')
+        participant_name = request.GET.get('username', f'user-{uuid.uuid4().hex[:8]}')
+        
+        api_key = os.environ.get("LIVEKIT_API_KEY")
+        api_secret = os.environ.get("LIVEKIT_API_SECRET")
+        
+        if not api_key or not api_secret:
+            print("ERROR: LIVEKIT_API_KEY or LIVEKIT_API_SECRET is missing from environment")
+            return Response({"error": "LiveKit credentials not configured. Please check environment variables."}, status=500)
 
-    token = api.AccessToken(api_key, api_secret) \
-        .with_identity(participant_name) \
-        .with_name(participant_name) \
-        .with_grants(api.VideoGrants(
-            room_join=True,
-            room=room_name,
-        ))
-    
-    return Response({
-        "token": token.to_jwt(),
-        "url": os.environ.get("LIVEKIT_URL")
-    })
+        token = api.AccessToken(api_key, api_secret) \
+            .with_identity(participant_name) \
+            .with_name(participant_name) \
+            .with_grants(api.VideoGrants(
+                room_join=True,
+                room=room_name,
+            ))
+        
+        return Response({
+            "token": token.to_jwt(),
+            "url": os.environ.get("LIVEKIT_URL")
+        })
+    except Exception as e:
+        import traceback
+        print(f"CRITICAL ERROR in get_livekit_token: {str(e)}")
+        print(traceback.format_exc())
+        return Response({"error": str(e)}, status=500)
