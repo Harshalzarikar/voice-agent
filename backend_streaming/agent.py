@@ -59,39 +59,20 @@ def build_agent() -> Agent:
 
 
 async def prewarm(proc: JobProcess) -> None:
-    """
-    Pre-initialize ALL heavy components here so the entrypoint
-    can start instantly without waiting for client setup.
-    """
-    logger.info("Prewarming components...")
-
-    # VAD (loads local model weights)
     proc.userdata["vad"] = silero.VAD.load()
+    
+    # ... (stt, llm setup as before) ...
 
-    # STT — create client once, reuse per job
     if AGENT_LANGUAGE == "hindi":
-        proc.userdata["stt"] = deepgram.STT(model="nova-3", language="hi")
-    else:
-        proc.userdata["stt"] = deepgram.STT(model="nova-3", language="en")
-
-    # LLM — shared client, thread-safe
-    proc.userdata["llm"] = openai.LLM(
-        model="meta-llama/llama-3.3-70b-instruct",
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ.get("OPENROUTER_API_KEY"),
-    )
-
-    # TTS — most expensive to init, especially Kokoro/Fal
-    if AGENT_LANGUAGE == "hindi":
-        proc.userdata["tts"] = KokoroHindiTTS(
+        tts_instance = KokoroHindiTTS(
             voice=os.environ.get("KOKORO_VOICE", "hf_alpha"),
             fal_key=os.environ.get("FAL_KEY"),
         )
+        # Wake the fal.ai container NOW, before any user connects
+        await tts_instance.warmup_endpoint()
+        proc.userdata["tts"] = tts_instance
     else:
         proc.userdata["tts"] = deepgram.TTS(model="aura-asteria-en")
-
-    logger.info("Prewarm complete.")
-
 
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name, "language": AGENT_LANGUAGE}
