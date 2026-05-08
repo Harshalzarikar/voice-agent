@@ -10,6 +10,7 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     JobProcess,
+    WorkerOptions,
     cli,
 )
 from livekit.plugins import deepgram, openai, silero
@@ -24,7 +25,6 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 logger = logging.getLogger("voice-agent")
 
 # Set the language mode: "hindi" or "english"
-# You can also read this from an env var: AGENT_LANGUAGE=hindi
 AGENT_LANGUAGE = os.environ.get("AGENT_LANGUAGE", "english").lower()
 
 
@@ -66,7 +66,8 @@ def build_agent() -> Agent:
 server = AgentServer()
 
 
-def prewarm(proc: JobProcess) -> None:
+async def prewarm(proc: JobProcess) -> None:
+    # Load VAD in advance to save time during job connection
     proc.userdata["vad"] = silero.VAD.load()
 
 
@@ -113,4 +114,14 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 if __name__ == "__main__":
-    cli.run_app(server)
+    # cli.run_app(server) is the standard way, but we want to customize WorkerOptions
+    # for production stability on limited-CPU environments.
+    cli.run_app(
+        server,
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_count=1,
+            initialize_timeout=60,
+            load_threshold=0.99,      # Allow higher load before rejecting jobs
+        )
+    )
