@@ -10,6 +10,7 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     JobProcess,
+    RoomInputOptions,
     WorkerOptions,
     cli,
 )
@@ -61,8 +62,7 @@ def build_agent() -> Agent:
 
 # ─── prewarm: MUST be a regular (sync) function ───────────────────────────────
 # livekit-agents 1.5.x calls this synchronously in the subprocess.
-# Only do sync work here: load the VAD model and instantiate clients.
-# The async fal.ai warmup happens in the entrypoint instead.
+# Pre-instantiate all plugins so they are ready the moment a user connects.
 def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
@@ -88,23 +88,34 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name, "language": AGENT_LANGUAGE}
     logger.info(f"Starting agent in language mode: {AGENT_LANGUAGE}")
 
-    tts = ctx.proc.userdata["tts"]
+    # ── CRITICAL: connect to the LiveKit room FIRST ────────────────────────────
+    # Without this, the room connection never opens and the job times out
+    # with "room connection was not established within 10 seconds".
+    await ctx.connect()
 
-    # Fire-and-forget warmup of the fal.ai endpoint (Hindi only).
-    # This runs concurrently with the room join so no extra latency is added.
-    if AGENT_LANGUAGE == "hindi" and isinstance(tts, KokoroHindiTTS):
-        asyncio.ensure_future(tts.warmup_endpoint())
+    tts_plugin = ctx.proc.userdata["tts"]
+
+    # Kick off fal.ai warmup concurrently — it runs in the background while
+    # the agent greets the user, so it does NOT add to perceived latency.
+    # The _warmed_up flag ensures this only does real work on the first call
+    # per process — subsequent jobs reuse the already-warm connection.
+    if AGENT_LANGUAGE == "hindi" and isinstance(tts_plugin, KokoroHindiTTS):
+        asyncio.ensure_future(tts_plugin.warmup_endpoint())
 
     session = AgentSession(
         stt=ctx.proc.userdata["stt"],
         llm=ctx.proc.userdata["llm"],
-        tts=tts,
+        tts=tts_plugin,
         vad=ctx.proc.userdata["vad"],
     )
 
     await session.start(
         agent=build_agent(),
         room=ctx.room,
+        room_input_options=RoomInputOptions(
+            # Keep session alive even if the user briefly disconnects
+            close_on_disconnect=False,
+        ),
     )
 
 
@@ -112,9 +123,9 @@ if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            prewarm_fnc=prewarm,              # sync ✓
-            num_idle_processes=1,              # keep 1 warm process ready
-            initialize_process_timeout=60.0,  # 60s for slow boot environments
-            load_threshold=0.99,              # accept jobs even under high CPU load
+            prewarm_fnc=prewarm,
+            num_idle_processes=1,
+            initialize_process_timeout=60.0,
+            load_threshold=0.99,
         )
     )
