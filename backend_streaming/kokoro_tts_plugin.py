@@ -65,13 +65,23 @@ class KokoroHindiStream(tts.ChunkedStream):
         self._kokoro_tts = tts
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        text = self._input_text
+        text = self._input_text.strip()
         fal_key = self._kokoro_tts._fal_key
         voice = self._kokoro_tts._voice
         speed = self._kokoro_tts._speed
 
         if not fal_key:
             raise RuntimeError("FAL_KEY is missing. Set it in your .env file.")
+
+        # Guard: skip API call if text is empty — fal.ai returns 422 for empty prompts
+        if not text:
+            import logging
+            logging.getLogger("kokoro_tts_plugin").warning(
+                "KokoroHindiTTS: received empty text, skipping synthesis."
+            )
+            return
+
+        payload = {"prompt": text, "voice": voice, "speed": speed}
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -80,8 +90,15 @@ class KokoroHindiStream(tts.ChunkedStream):
                     "Authorization": f"Key {fal_key}",
                     "Content-Type": "application/json",
                 },
-                json={"prompt": text, "voice": voice, "speed": speed},
+                json=payload,
             )
+            if resp.status_code == 422:
+                import logging
+                logging.getLogger("kokoro_tts_plugin").error(
+                    "Fal AI 422 error. Request payload: %s | Response: %s",
+                    payload,
+                    resp.text,
+                )
             resp.raise_for_status()
             data = resp.json()
             audio_url = data.get("audio", {}).get("url")
