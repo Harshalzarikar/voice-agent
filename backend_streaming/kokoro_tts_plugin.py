@@ -17,6 +17,11 @@ from livekit.agents.types import APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 SAMPLE_RATE = 24000  # Kokoro outputs 24kHz
 NUM_CHANNELS = 1
 
+# Only these voices are valid for the fal-ai/kokoro/hindi endpoint.
+# English voices (af_*, am_*) will cause a 422 Unprocessable Entity error.
+_VALID_HINDI_VOICES = {"hf_alpha", "hf_beta", "hm_omega", "hm_psi"}
+_DEFAULT_HINDI_VOICE = "hf_alpha"
+
 
 class KokoroHindiTTS(tts.TTS):
     """
@@ -27,7 +32,7 @@ class KokoroHindiTTS(tts.TTS):
     def __init__(
         self,
         *,
-        voice: str = "hf_alpha",
+        voice: str = _DEFAULT_HINDI_VOICE,
         speed: float = 1.0,
         fal_key: str | None = None,
     ):
@@ -36,6 +41,15 @@ class KokoroHindiTTS(tts.TTS):
             sample_rate=SAMPLE_RATE,
             num_channels=NUM_CHANNELS,
         )
+        # Validate voice — English voices (e.g. af_heart) cause a 422 on the Hindi endpoint
+        if voice not in _VALID_HINDI_VOICES:
+            import logging
+            logging.getLogger("kokoro_tts_plugin").warning(
+                "KokoroHindiTTS: voice '%s' is not a valid Hindi voice "
+                "(valid: %s). Falling back to '%s'.",
+                voice, ", ".join(sorted(_VALID_HINDI_VOICES)), _DEFAULT_HINDI_VOICE,
+            )
+            voice = _DEFAULT_HINDI_VOICE
         self._voice = voice
         self._speed = speed
         self._fal_key = fal_key or os.environ.get("FAL_KEY", "")
