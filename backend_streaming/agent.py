@@ -73,13 +73,31 @@ def prewarm(proc: JobProcess) -> None:
     )
 
     if AGENT_LANGUAGE == "hindi":
-        proc.userdata["stt"] = deepgram.STT(model="nova-2", language="hi")
+        proc.userdata["stt"] = deepgram.STT(
+            model="nova-3",          # nova-3 has better Hindi support than nova-2
+            language="hi",
+            interim_results=True,    # keeps WebSocket alive, enables fast partial results
+            smart_format=True,       # better punctuation and formatting
+            endpointing_ms=200,      # 200ms of silence = end of utterance (conversational)
+            filler_words=False,      # don't transcribe "um", "uh" etc.
+            vad_events=True,         # VAD events for better interruption handling
+            no_delay=True,           # send audio immediately, no buffering
+        )
         proc.userdata["tts"] = KokoroHindiTTS(
             voice=os.environ.get("KOKORO_VOICE", "hf_alpha"),
             fal_key=os.environ.get("FAL_KEY"),
         )
     else:
-        proc.userdata["stt"] = deepgram.STT(model="nova-2", language="en")
+        proc.userdata["stt"] = deepgram.STT(
+            model="nova-3",
+            language="en-US",
+            interim_results=True,
+            smart_format=True,
+            endpointing_ms=200,
+            filler_words=False,
+            vad_events=True,
+            no_delay=True,
+        )
         proc.userdata["tts"] = deepgram.TTS(model="aura-asteria-en")
 
 
