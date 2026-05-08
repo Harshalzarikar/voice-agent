@@ -2,15 +2,17 @@
 Custom LiveKit TTS Plugin that wraps fal-ai/kokoro/hindi.
 Compatible with livekit-agents v1.5+
 
-Key fixes vs original:
-  - Persistent httpx.AsyncClient with connection pooling (created once, reused forever)
-  - Warm-up call during __init__ to wake the fal.ai container before any user speaks
-  - Reduced per-attempt timeout now that cold-start is handled at init
+Design:
+  - Persistent httpx.AsyncClient with connection pooling (created once, reused per job)
+  - warmup_endpoint() can be called to pre-warm the fal.ai container
+  - Exponential backoff retries for timeout errors
+  - Reduced per-attempt timeout (30s) after warm-up handles cold-start
 """
-import io
-import os
 import asyncio
+import io
 import logging
+import os
+
 import httpx
 import numpy as np
 import soundfile as sf
@@ -25,9 +27,8 @@ NUM_CHANNELS = 1
 
 _VALID_HINDI_VOICES = {"hf_alpha", "hf_beta", "hm_omega", "hm_psi"}
 _DEFAULT_HINDI_VOICE = "hf_alpha"
-
-# Short warm-up text — just enough to wake the fal.ai container
 _WARMUP_TEXT = "नमस्ते"
+_FAL_ENDPOINT = "https://fal.run/fal-ai/kokoro/hindi"
 
 
 class KokoroHindiTTS(tts.TTS):
@@ -42,7 +43,6 @@ class KokoroHindiTTS(tts.TTS):
         voice: str = _DEFAULT_HINDI_VOICE,
         speed: float = 1.0,
         fal_key: str | None = None,
-        warmup: bool = True,
     ):
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=False),
@@ -52,8 +52,7 @@ class KokoroHindiTTS(tts.TTS):
 
         if voice not in _VALID_HINDI_VOICES:
             logger.warning(
-                "KokoroHindiTTS: voice '%s' is not valid (valid: %s). "
-                "Falling back to '%s'.",
+                "KokoroHindiTTS: voice '%s' is not valid (valid: %s). Falling back to '%s'.",
                 voice, ", ".join(sorted(_VALID_HINDI_VOICES)), _DEFAULT_HINDI_VOICE,
             )
             voice = _DEFAULT_HINDI_VOICE
@@ -61,12 +60,10 @@ class KokoroHindiTTS(tts.TTS):
         self._voice = voice
         self._speed = speed
         self._fal_key = fal_key or os.environ.get("FAL_KEY", "")
-        self._warmup = warmup
+        self._warmed_up = False
 
-        # ── Persistent client: created once, reused for every synthesis call ──
-        # limits=10 keeps at most 10 simultaneous connections open.
-        # keepalive_expiry=30 holds idle TCP connections alive for 30s so
-        # subsequent requests skip the TCP + TLS handshake entirely.
+        # Persistent client — reused across all synthesis calls to avoid
+        # TCP/TLS handshake overhead on every request.
         self._client = httpx.AsyncClient(
             timeout=60.0,
             limits=httpx.Limits(
@@ -79,28 +76,27 @@ class KokoroHindiTTS(tts.TTS):
                 "Content-Type": "application/json",
             },
         )
-        self._warmed_up = False
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Call this once inside prewarm() to wake the fal.ai container early,
-    # before any user connects.  If warmup=False the call is skipped.
-    # ──────────────────────────────────────────────────────────────────────────
     async def warmup_endpoint(self) -> None:
-        """Send a short silent request to wake the fal.ai container."""
-        if not self._warmup or self._warmed_up:
+        """
+        Send a short request to wake the fal.ai container.
+        Safe to call concurrently — subsequent calls are no-ops.
+        """
+        if self._warmed_up:
             return
         logger.info("KokoroHindiTTS: warming up fal.ai endpoint...")
         try:
             resp = await self._client.post(
-                "https://fal.run/fal-ai/kokoro/hindi",
+                _FAL_ENDPOINT,
                 json={"prompt": _WARMUP_TEXT, "voice": self._voice, "speed": self._speed},
-                timeout=90.0,   # allow full cold-start time only here
+                timeout=90.0,  # allow full cold-start only during warm-up
             )
             resp.raise_for_status()
             self._warmed_up = True
             logger.info("KokoroHindiTTS: endpoint is warm.")
         except Exception as exc:
-            # Don't crash prewarm if fal.ai is flaky — real calls will still retry
+            # Don't crash the agent if fal.ai is flaky during warm-up.
+            # Real synthesis calls will still retry on their own.
             logger.warning("KokoroHindiTTS: warm-up failed (will retry on first call): %s", exc)
 
     async def aclose(self) -> None:
@@ -134,11 +130,11 @@ class KokoroHindiStream(tts.ChunkedStream):
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         text = self._input_text.strip()
         if not text:
-            logger.warning("KokoroHindiTTS: empty text, skipping synthesis.")
+            logger.warning("KokoroHindiTTS: received empty text, skipping synthesis.")
             return
 
         tts_instance = self._kokoro_tts
-        client = tts_instance._client   # reuse the persistent client
+        client = tts_instance._client  # reuse persistent client
         payload = {
             "prompt": text,
             "voice": tts_instance._voice,
@@ -146,41 +142,44 @@ class KokoroHindiStream(tts.ChunkedStream):
         }
 
         MAX_RETRIES = 2
+        audio_bytes: bytes | None = None
         last_exc: Exception | None = None
 
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if attempt > 0:
-                    wait = 2 ** attempt
+                    wait = 2 ** attempt  # 2s, 4s
                     logger.warning(
                         "KokoroHindiTTS: retry %d/%d after %ds (last error: %s)",
                         attempt, MAX_RETRIES, wait, last_exc,
                     )
                     await asyncio.sleep(wait)
 
-                # ── Step 1: request audio generation ──────────────────────────
+                # Step 1: request audio generation
                 resp = await client.post(
-                    "https://fal.run/fal-ai/kokoro/hindi",
+                    _FAL_ENDPOINT,
                     json=payload,
-                    # After warm-up, generation should complete in < 10s
-                    timeout=30.0,
+                    timeout=30.0,  # fast after warm-up; slow cold-starts retried
                 )
                 if resp.status_code == 422:
                     logger.error(
-                        "Fal AI 422 error. Payload: %s | Response: %s",
+                        "KokoroHindiTTS: 422 Unprocessable Entity. "
+                        "Payload: %s | Response: %s",
                         payload, resp.text,
                     )
                 resp.raise_for_status()
 
                 audio_url = resp.json().get("audio", {}).get("url")
                 if not audio_url:
-                    raise RuntimeError(f"Fal AI returned no audio URL. Response: {resp.json()}")
+                    raise RuntimeError(
+                        f"Fal AI returned no audio URL. Full response: {resp.json()}"
+                    )
 
-                # ── Step 2: download the audio file ───────────────────────────
+                # Step 2: download the audio file
                 audio_resp = await client.get(audio_url, timeout=15.0)
                 audio_resp.raise_for_status()
                 audio_bytes = audio_resp.content
-                break  # success
+                break  # success — exit retry loop
 
             except httpx.TimeoutException as exc:
                 last_exc = exc
@@ -189,14 +188,18 @@ class KokoroHindiStream(tts.ChunkedStream):
                     attempt + 1, MAX_RETRIES + 1, exc,
                 )
                 if attempt == MAX_RETRIES:
-                    logger.error("KokoroHindiTTS: all attempts timed out.")
+                    logger.error("KokoroHindiTTS: all %d attempts timed out, giving up.", MAX_RETRIES + 1)
                     raise
-                continue
 
-            except httpx.HTTPStatusError:
-                raise  # 4xx → don't retry
+            except httpx.HTTPStatusError as exc:
+                # 4xx errors are not retryable (bad request, auth failure, etc.)
+                logger.error("KokoroHindiTTS: HTTP error %s, not retrying.", exc.response.status_code)
+                raise
 
-        # ── Decode WAV → raw int16 PCM ─────────────────────────────────────────
+        if audio_bytes is None:
+            raise RuntimeError("KokoroHindiTTS: no audio received after all retries.")
+
+        # Decode WAV → raw int16 PCM
         with io.BytesIO(audio_bytes) as buf:
             audio_data, sample_rate = sf.read(buf, dtype="int16")
 
@@ -212,8 +215,9 @@ class KokoroHindiStream(tts.ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        CHUNK_SAMPLES = sample_rate // 10  # 100 ms chunks
-        chunk_bytes = CHUNK_SAMPLES * NUM_CHANNELS * 2
+        # Push in 100ms chunks for smooth LiveKit streaming
+        CHUNK_SAMPLES = sample_rate // 10
+        chunk_bytes = CHUNK_SAMPLES * NUM_CHANNELS * 2  # 2 bytes per int16 sample
 
         for i in range(0, len(pcm_bytes), chunk_bytes):
             output_emitter.push(pcm_bytes[i : i + chunk_bytes])

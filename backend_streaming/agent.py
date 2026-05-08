@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -58,10 +59,13 @@ def build_agent() -> Agent:
     return VoiceAgent()
 
 
-async def prewarm(proc: JobProcess) -> None:
+# ─── prewarm: MUST be a regular (sync) function ───────────────────────────────
+# livekit-agents 1.5.x calls this synchronously in the subprocess.
+# Only do sync work here: load the VAD model and instantiate clients.
+# The async fal.ai warmup happens in the entrypoint instead.
+def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
-    
-    # Initialize LLM (same for both languages)
+
     proc.userdata["llm"] = openai.LLM(
         model="llama-3.1-70b-versatile",
         base_url="https://api.groq.com/openai/v1",
@@ -70,26 +74,31 @@ async def prewarm(proc: JobProcess) -> None:
 
     if AGENT_LANGUAGE == "hindi":
         proc.userdata["stt"] = deepgram.STT(model="nova-2", language="hi")
-        tts_instance = KokoroHindiTTS(
+        proc.userdata["tts"] = KokoroHindiTTS(
             voice=os.environ.get("KOKORO_VOICE", "hf_alpha"),
             fal_key=os.environ.get("FAL_KEY"),
         )
-        # Wake the fal.ai container NOW, before any user connects
-        await tts_instance.warmup_endpoint()
-        proc.userdata["tts"] = tts_instance
     else:
         proc.userdata["stt"] = deepgram.STT(model="nova-2", language="en")
         proc.userdata["tts"] = deepgram.TTS(model="aura-asteria-en")
 
+
+# ─── entrypoint: async, runs per job ──────────────────────────────────────────
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name, "language": AGENT_LANGUAGE}
     logger.info(f"Starting agent in language mode: {AGENT_LANGUAGE}")
 
-    # Reuse prewarmed clients — no cold-start delay
+    tts = ctx.proc.userdata["tts"]
+
+    # Fire-and-forget warmup of the fal.ai endpoint (Hindi only).
+    # This runs concurrently with the room join so no extra latency is added.
+    if AGENT_LANGUAGE == "hindi" and isinstance(tts, KokoroHindiTTS):
+        asyncio.ensure_future(tts.warmup_endpoint())
+
     session = AgentSession(
         stt=ctx.proc.userdata["stt"],
         llm=ctx.proc.userdata["llm"],
-        tts=ctx.proc.userdata["tts"],
+        tts=tts,
         vad=ctx.proc.userdata["vad"],
     )
 
@@ -103,9 +112,9 @@ if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            prewarm_fnc=prewarm,
-            num_idle_processes=1,              # Keep 1 warm process ready
-            initialize_process_timeout=60.0,   # 60s to boot on slow CPUs
-            load_threshold=0.99,               # Accept jobs even under high CPU load
+            prewarm_fnc=prewarm,              # sync ✓
+            num_idle_processes=1,              # keep 1 warm process ready
+            initialize_process_timeout=60.0,  # 60s for slow boot environments
+            load_threshold=0.99,              # accept jobs even under high CPU load
         )
     )
