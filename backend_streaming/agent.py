@@ -98,7 +98,10 @@ def prewarm(proc: JobProcess) -> None:
             vad_events=True,
             no_delay=True,
         )
-        proc.userdata["tts"] = deepgram.TTS(model="aura-asteria-en")
+        proc.userdata["tts"] = openai.TTS(
+            model="tts-1",     # tts-1 = fast, tts-1-hd = higher quality
+            voice="alloy",     # alloy, echo, fable, onyx, nova, shimmer
+        )
 
 
 # ─── entrypoint: async, runs per job ──────────────────────────────────────────
