@@ -79,6 +79,9 @@ class KokoroHindiStream(tts.ChunkedStream):
         self._kokoro_tts = tts
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        import logging
+        logger = logging.getLogger("kokoro_tts_plugin")
+
         text = self._input_text.strip()
         fal_key = self._kokoro_tts._fal_key
         voice = self._kokoro_tts._voice
@@ -89,39 +92,72 @@ class KokoroHindiStream(tts.ChunkedStream):
 
         # Guard: skip API call if text is empty — fal.ai returns 422 for empty prompts
         if not text:
-            import logging
-            logging.getLogger("kokoro_tts_plugin").warning(
-                "KokoroHindiTTS: received empty text, skipping synthesis."
-            )
+            logger.warning("KokoroHindiTTS: received empty text, skipping synthesis.")
             return
 
         payload = {"prompt": text, "voice": voice, "speed": speed}
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://fal.run/fal-ai/kokoro/hindi",
-                headers={
-                    "Authorization": f"Key {fal_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            if resp.status_code == 422:
-                import logging
-                logging.getLogger("kokoro_tts_plugin").error(
-                    "Fal AI 422 error. Request payload: %s | Response: %s",
-                    payload,
-                    resp.text,
-                )
-            resp.raise_for_status()
-            data = resp.json()
-            audio_url = data.get("audio", {}).get("url")
-            if not audio_url:
-                raise RuntimeError(f"Fal AI returned no audio URL. Response: {data}")
+        # fal.ai Kokoro Hindi has slow cold starts — use 90s timeout + 2 retries
+        MAX_RETRIES = 2
+        TIMEOUT_SECONDS = 90.0
+        last_exc: Exception | None = None
 
-            audio_resp = await client.get(audio_url)
-            audio_resp.raise_for_status()
-            audio_bytes = audio_resp.content
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                if attempt > 0:
+                    wait = 2 ** attempt  # 2s, 4s backoff
+                    logger.warning(
+                        "KokoroHindiTTS: retry %d/%d after %ds (last error: %s)",
+                        attempt, MAX_RETRIES, wait, last_exc,
+                    )
+                    await asyncio.sleep(wait)
+
+                async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                    resp = await client.post(
+                        "https://fal.run/fal-ai/kokoro/hindi",
+                        headers={
+                            "Authorization": f"Key {fal_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+                    if resp.status_code == 422:
+                        logger.error(
+                            "Fal AI 422 error. Request payload: %s | Response: %s",
+                            payload, resp.text,
+                        )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    audio_url = data.get("audio", {}).get("url")
+                    if not audio_url:
+                        raise RuntimeError(
+                            f"Fal AI returned no audio URL. Response: {data}"
+                        )
+
+                    audio_resp = await client.get(audio_url, timeout=30.0)
+                    audio_resp.raise_for_status()
+                    audio_bytes = audio_resp.content
+
+                # Success — break out of retry loop
+                break
+
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                logger.warning(
+                    "KokoroHindiTTS: timeout on attempt %d/%d (%s)",
+                    attempt + 1, MAX_RETRIES + 1, exc,
+                )
+                if attempt == MAX_RETRIES:
+                    logger.error(
+                        "KokoroHindiTTS: all %d attempts timed out, giving up.",
+                        MAX_RETRIES + 1,
+                    )
+                    raise
+                continue
+
+            except httpx.HTTPStatusError:
+                # Don't retry on 4xx client errors (wrong payload etc.)
+                raise
 
         # Decode the audio file to raw 16-bit PCM
         with io.BytesIO(audio_bytes) as buf:
