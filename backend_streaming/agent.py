@@ -104,8 +104,8 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
-            prewarm_count=1,
-            initialize_timeout=60,
-            load_threshold=0.99,
+            num_idle_processes=1,              # Keep 1 warm process ready
+            initialize_process_timeout=60.0,   # 60s to boot on slow CPUs
+            load_threshold=0.99,               # Accept jobs even under high CPU load
         )
     )
