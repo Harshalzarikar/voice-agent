@@ -61,9 +61,15 @@ def build_agent() -> Agent:
 async def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
     
-    # ... (stt, llm setup as before) ...
+    # Initialize LLM (same for both languages)
+    proc.userdata["llm"] = openai.LLM(
+        model="llama-3.1-70b-versatile",
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.environ.get("GROQ_API_KEY"),
+    )
 
     if AGENT_LANGUAGE == "hindi":
+        proc.userdata["stt"] = deepgram.STT(model="nova-2", language="hi")
         tts_instance = KokoroHindiTTS(
             voice=os.environ.get("KOKORO_VOICE", "hf_alpha"),
             fal_key=os.environ.get("FAL_KEY"),
@@ -72,6 +78,7 @@ async def prewarm(proc: JobProcess) -> None:
         await tts_instance.warmup_endpoint()
         proc.userdata["tts"] = tts_instance
     else:
+        proc.userdata["stt"] = deepgram.STT(model="nova-2", language="en")
         proc.userdata["tts"] = deepgram.TTS(model="aura-asteria-en")
 
 async def entrypoint(ctx: JobContext) -> None:
