@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 
 from livekit.agents import (
     Agent,
-    AgentServer,
     AgentSession,
     JobContext,
     JobProcess,
@@ -63,18 +62,11 @@ def build_agent() -> Agent:
     return VoiceAgent()
 
 
-server = AgentServer()
-
-
 async def prewarm(proc: JobProcess) -> None:
     # Load VAD in advance to save time during job connection
     proc.userdata["vad"] = silero.VAD.load()
 
 
-server.setup_fnc = prewarm
-
-
-@server.rtc_session()
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name, "language": AGENT_LANGUAGE}
     logger.info(f"Starting agent in language mode: {AGENT_LANGUAGE}")
@@ -114,14 +106,13 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 if __name__ == "__main__":
-    # cli.run_app(server) is the standard way, but we want to customize WorkerOptions
-    # for production stability on limited-CPU environments.
+    # In production, we customize WorkerOptions for stability on limited-CPU environments.
     cli.run_app(
-        server,
         WorkerOptions(
             entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
             prewarm_count=1,
             initialize_timeout=60,
-            load_threshold=0.99,      # Allow higher load before rejecting jobs
+            load_threshold=0.99,
         )
     )
