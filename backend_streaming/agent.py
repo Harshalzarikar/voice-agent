@@ -14,21 +14,17 @@ from livekit.agents import (
 )
 from livekit.plugins import deepgram, openai, silero
 
-# Allow importing our custom kokoro plugin from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
 from kokoro_tts_plugin import KokoroHindiTTS
 
-# Load the .env file from the project root
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 logger = logging.getLogger("voice-agent")
 
-# Set the language mode: "hindi" or "english"
 AGENT_LANGUAGE = os.environ.get("AGENT_LANGUAGE", "english").lower()
 
 
 def build_agent() -> Agent:
-    """Build the Agent with the correct language instructions."""
     if AGENT_LANGUAGE == "hindi":
         instructions = (
             "आप एक सहायक वॉइस असिस्टेंट हैं। "
@@ -63,41 +59,51 @@ def build_agent() -> Agent:
 
 
 async def prewarm(proc: JobProcess) -> None:
-    # Load VAD in advance to save time during job connection
+    """
+    Pre-initialize ALL heavy components here so the entrypoint
+    can start instantly without waiting for client setup.
+    """
+    logger.info("Prewarming components...")
+
+    # VAD (loads local model weights)
     proc.userdata["vad"] = silero.VAD.load()
+
+    # STT — create client once, reuse per job
+    if AGENT_LANGUAGE == "hindi":
+        proc.userdata["stt"] = deepgram.STT(model="nova-3", language="hi")
+    else:
+        proc.userdata["stt"] = deepgram.STT(model="nova-3", language="en")
+
+    # LLM — shared client, thread-safe
+    proc.userdata["llm"] = openai.LLM(
+        model="meta-llama/llama-3.3-70b-instruct",
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ.get("OPENROUTER_API_KEY"),
+    )
+
+    # TTS — most expensive to init, especially Kokoro/Fal
+    if AGENT_LANGUAGE == "hindi":
+        proc.userdata["tts"] = KokoroHindiTTS(
+            voice=os.environ.get("KOKORO_VOICE", "hf_alpha"),
+            fal_key=os.environ.get("FAL_KEY"),
+        )
+    else:
+        proc.userdata["tts"] = deepgram.TTS(model="aura-asteria-en")
+
+    logger.info("Prewarm complete.")
 
 
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name, "language": AGENT_LANGUAGE}
     logger.info(f"Starting agent in language mode: {AGENT_LANGUAGE}")
 
-    if AGENT_LANGUAGE == "hindi":
-        # Hindi mode: Deepgram STT (Hindi) + OpenRouter LLM + Kokoro Hindi TTS (Fal AI)
-        session = AgentSession(
-            stt=deepgram.STT(model="nova-3", language="hi"),
-            llm=openai.LLM(
-                model="meta-llama/llama-3.3-70b-instruct",
-                base_url="https://openrouter.ai/api/v1",
-                api_key=os.environ.get("OPENROUTER_API_KEY"),
-            ),
-            tts=KokoroHindiTTS(
-                voice=os.environ.get("KOKORO_VOICE", "hf_alpha"),
-                fal_key=os.environ.get("FAL_KEY"),
-            ),
-            vad=ctx.proc.userdata["vad"],
-        )
-    else:
-        # English mode: Deepgram STT + OpenRouter LLM + Deepgram TTS
-        session = AgentSession(
-            stt=deepgram.STT(model="nova-3", language="en"),
-            llm=openai.LLM(
-                model="meta-llama/llama-3.3-70b-instruct",
-                base_url="https://openrouter.ai/api/v1",
-                api_key=os.environ.get("OPENROUTER_API_KEY"),
-            ),
-            tts=deepgram.TTS(model="aura-asteria-en"),
-            vad=ctx.proc.userdata["vad"],
-        )
+    # Reuse prewarmed clients — no cold-start delay
+    session = AgentSession(
+        stt=ctx.proc.userdata["stt"],
+        llm=ctx.proc.userdata["llm"],
+        tts=ctx.proc.userdata["tts"],
+        vad=ctx.proc.userdata["vad"],
+    )
 
     await session.start(
         agent=build_agent(),
@@ -106,7 +112,6 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 if __name__ == "__main__":
-    # In production, we customize WorkerOptions for stability on limited-CPU environments.
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
